@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block title %}Pipeline - Orca Slicer{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <h2 class="text-2xl font-bold text-gray-100">SCAD Pipeline</h2>
+    <p class="text-gray-400 mt-1">Customize SCAD parameters and export directly to printable GCode</p>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <!-- Left Panel: SCAD Selection and Parameters -->
+    <div class="lg:col-span-2 space-y-4">
+        <!-- Pipeline Form -->
+        <div class="bg-gray-800 rounded-lg border border-gray-700 p-4">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-semibold text-gray-100">Pipeline Configuration</h3>
+                <span id="form-indicator" class="htmx-indicator">
+                    <svg class="animate-spin h-5 w-5 text-cyan-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                </span>
+            </div>
+
+            <!-- Pipeline Form Container -->
+            <div id="pipeline-form"
+                 hx-get="/ui/pipeline/form"
+                 hx-trigger="load"
+                 hx-swap="innerHTML"
+                 hx-indicator="#form-indicator">
+                <div class="text-gray-500 text-center py-8">
+                    Loading...
+                </div>
+            </div>
+        </div>
+
+        <!-- Pipeline Status (shows after starting) -->
+        <div id="pipeline-status" class="hidden">
+            <!-- Status content injected by HTMX -->
+        </div>
+    </div>
+
+    <!-- Right Panel: Recent Jobs -->
+    <div class="lg:col-span-1">
+        <div class="bg-gray-800 rounded-lg border border-gray-700 p-4">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-semibold text-gray-100">Recent Pipelines</h3>
+                <span id="jobs-indicator" class="htmx-indicator">
+                    <svg class="animate-spin h-5 w-5 text-cyan-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                </span>
+            </div>
+
+            <div id="pipeline-jobs"
+                 hx-get="/ui/pipeline/jobs"
+                 hx-trigger="load, every 5s"
+                 hx-swap="innerHTML"
+                 hx-indicator="#jobs-indicator">
+                <div class="text-gray-500 text-center py-4">
+                    Loading jobs...
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Links -->
+        <div class="mt-4 bg-gray-800 rounded-lg border border-gray-700 p-4">
+            <h3 class="text-sm font-semibold text-gray-400 mb-3">Related Pages</h3>
+            <div class="space-y-2">
+                <a href="/ui/scad" class="flex items-center gap-2 text-cyan-400 hover:text-cyan-300 text-sm">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
+                    </svg>
+                    SCAD Editor (standalone)
+                </a>
+                <a href="/ui" class="flex items-center gap-2 text-cyan-400 hover:text-cyan-300 text-sm">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"></path>
+                    </svg>
+                    File Browser
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

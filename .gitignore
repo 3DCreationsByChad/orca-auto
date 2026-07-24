@@ -1,0 +1,11 @@
+venv/
+__pycache__/
+*.pyc
+*.egg-info/
+data/jobs.json
+result.json
+.env
+*.log
+nul
+FORK_REPORT.md
+SANITIZATION_REPORT.md

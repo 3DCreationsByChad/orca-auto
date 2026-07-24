@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}Files - Orca Slicer{% endblock %}
+
+{% block content %}
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+    <!-- File Browser Panel -->
+    <div class="lg:col-span-2">
+        <!-- Profile Manager -->
+        {% include "partials/profile_manager.html" %}
+
+        <div class="bg-gray-800 rounded-lg border border-gray-700 p-4">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-lg font-semibold text-gray-100">Model Files</h2>
+                <span class="htmx-indicator">
+                    <svg class="animate-spin h-5 w-5 text-cyan-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                </span>
+            </div>
+
+            <!-- Breadcrumb -->
+            <div id="breadcrumb" class="text-sm mb-3 flex items-center gap-2">
+                <span class="text-gray-400">Path:</span>
+                <span id="current-path" class="text-gray-100 font-mono">/{{ current_path or 'root' }}</span>
+            </div>
+
+            <!-- File List (HTMX target) -->
+            <div id="file-list" hx-indicator=".htmx-indicator">
+                {% include "partials/file_list.html" %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Jobs Panel -->
+    <div class="lg:col-span-1">
+        <div class="bg-gray-800 rounded-lg border border-gray-700 p-4">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-semibold text-gray-100">Recent Jobs</h2>
+                <div id="poll-indicator" class="w-2 h-2 rounded-full bg-gray-600"></div>
+            </div>
+            <div hx-get="/ui/jobs"
+                 hx-trigger="load"
+                 hx-swap="innerHTML">
+                <div class="text-gray-500 text-sm text-center py-4">
+                    Loading jobs...
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

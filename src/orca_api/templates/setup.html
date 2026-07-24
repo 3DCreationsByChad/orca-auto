@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+
+{% block title %}Orca Auto Setup{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto mt-12">
+    <div class="bg-gray-800 rounded-lg shadow-xl p-8 border border-gray-700">
+        <div class="text-center mb-8">
+            <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-cyan-500/20 mb-4">
+                <svg class="w-8 h-8 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                </svg>
+            </div>
+            <h1 class="text-3xl font-bold text-white mb-2">Orca Auto Setup</h1>
+            <p class="text-gray-400">Welcome! Let's configure Orca Auto.</p>
+        </div>
+
+        <!-- Step Indicator -->
+        <div class="flex items-center justify-center mb-8" id="step-indicator">
+            <div class="flex items-center">
+                <div class="flex items-center justify-center w-8 h-8 rounded-full bg-cyan-500 text-white text-sm font-semibold" id="step-1-indicator">1</div>
+                <span class="ml-2 text-cyan-400 text-sm">Paths</span>
+            </div>
+            <div class="w-12 h-0.5 bg-gray-600 mx-3"></div>
+            <div class="flex items-center">
+                <div class="flex items-center justify-center w-8 h-8 rounded-full bg-gray-600 text-gray-400 text-sm font-semibold" id="step-2-indicator">2</div>
+                <span class="ml-2 text-gray-500 text-sm">Profiles</span>
+            </div>
+            <div class="w-12 h-0.5 bg-gray-600 mx-3"></div>
+            <div class="flex items-center">
+                <div class="flex items-center justify-center w-8 h-8 rounded-full bg-gray-600 text-gray-400 text-sm font-semibold" id="step-3-indicator">3</div>
+                <span class="ml-2 text-gray-500 text-sm">Complete</span>
+            </div>
+        </div>
+
+        <!-- Wizard Content Area - loads HTMX partials -->
+        <div id="wizard-content" hx-get="/ui/setup/step/paths" hx-trigger="load" hx-swap="innerHTML">
+            <div class="text-center py-8">
+                <div class="inline-block animate-spin rounded-full h-8 w-8 border-4 border-gray-600 border-t-cyan-400"></div>
+                <p class="text-gray-400 mt-4">Loading setup wizard...</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Update step indicator when step changes
+    function updateStepIndicator(step) {
+        // Step 1
+        const step1 = document.getElementById('step-1-indicator');
+        const step2 = document.getElementById('step-2-indicator');
+        const step3 = document.getElementById('step-3-indicator');
+
+        // Reset all steps
+        [step1, step2, step3].forEach((el, idx) => {
+            if (idx + 1 < step) {
+                el.className = 'flex items-center justify-center w-8 h-8 rounded-full bg-green-500 text-white text-sm font-semibold';
+                el.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>';
+            } else if (idx + 1 === step) {
+                el.className = 'flex items-center justify-center w-8 h-8 rounded-full bg-cyan-500 text-white text-sm font-semibold';
+                el.textContent = idx + 1;
+            } else {
+                el.className = 'flex items-center justify-center w-8 h-8 rounded-full bg-gray-600 text-gray-400 text-sm font-semibold';
+                el.textContent = idx + 1;
+            }
+        });
+
+        // Update step labels
+        const labels = document.querySelectorAll('#step-indicator span');
+        labels.forEach((label, idx) => {
+            if (idx < step) {
+                label.className = 'ml-2 text-cyan-400 text-sm';
+            } else {
+                label.className = 'ml-2 text-gray-500 text-sm';
+            }
+        });
+    }
+
+    // Listen for HTMX events to update step indicator
+    document.body.addEventListener('htmx:afterSwap', function(event) {
+        const content = document.getElementById('wizard-content');
+        if (content) {
+            const stepAttr = content.querySelector('[data-step]');
+            if (stepAttr) {
+                updateStepIndicator(parseInt(stepAttr.dataset.step));
+            }
+        }
+    });
+</script>
+{% endblock %}

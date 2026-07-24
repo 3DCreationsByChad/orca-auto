@@ -1,0 +1,30 @@
+{% if scad_files %}
+<div class="space-y-1">
+    {% for file in scad_files %}
+    <div class="px-3 py-2 rounded cursor-pointer transition-colors hover:bg-gray-700 border border-transparent hover:border-gray-600 scad-file-item"
+         hx-get="/ui/scad/params/{{ file.path }}"
+         hx-target="#params-panel"
+         hx-swap="innerHTML"
+         hx-indicator="#params-indicator"
+         onclick="document.querySelectorAll('.scad-file-item').forEach(el => el.classList.remove('bg-gray-700', 'border-cyan-500')); this.classList.add('bg-gray-700', 'border-cyan-500');">
+        <div class="flex items-center gap-2">
+            <svg class="w-4 h-4 text-cyan-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+            </svg>
+            <span class="text-gray-100 text-sm truncate" title="{{ file.path }}">{{ file.name }}</span>
+        </div>
+        {% if '/' in file.path or '\\' in file.path %}
+        <div class="text-gray-500 text-xs ml-6 truncate" title="{{ file.path }}">{{ file.path }}</div>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="text-gray-500 text-center py-8">
+    <svg class="mx-auto h-12 w-12 text-gray-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"></path>
+    </svg>
+    <p class="text-sm">No SCAD files found</p>
+    <p class="text-xs mt-1">Add .scad files to your models directory</p>
+</div>
+{% endif %}

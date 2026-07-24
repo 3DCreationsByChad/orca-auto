@@ -1,0 +1,140 @@
+{% set is_terminal = job.pipeline_status.value in ['completed', 'failed'] %}
+
+<div class="bg-gray-800 rounded-lg border border-gray-700 p-4"
+     {% if not is_terminal %}
+     hx-get="/ui/pipeline/status/{{ job.id }}"
+     hx-trigger="every 2s"
+     hx-swap="outerHTML"
+     {% endif %}>
+
+    <div class="flex justify-between items-center mb-4">
+        <h3 class="text-lg font-semibold text-gray-100">Pipeline Status</h3>
+        <span class="text-xs text-gray-500">{{ job.id[:8] }}...</span>
+    </div>
+
+    <!-- Stage Progress Indicator -->
+    <div class="mb-6">
+        <div class="flex items-center justify-between mb-2">
+            {% set stages = ['editing', 'exporting', 'slicing', 'queued', 'completed'] %}
+            {% set current_idx = stages.index(job.pipeline_status.value) if job.pipeline_status.value in stages else -1 %}
+
+            {% for stage in stages %}
+            {% set idx = loop.index0 %}
+            {% set is_active = job.pipeline_status.value == stage %}
+            {% set is_completed = idx < current_idx %}
+            {% set is_failed = job.pipeline_status.value == 'failed' and idx == current_idx %}
+
+            <div class="flex flex-col items-center flex-1">
+                <div class="w-8 h-8 rounded-full flex items-center justify-center
+                            {% if is_failed %}bg-red-500/20 border-2 border-red-500
+                            {% elif is_completed %}bg-green-500/20 border-2 border-green-500
+                            {% elif is_active %}bg-cyan-500/20 border-2 border-cyan-500 animate-pulse
+                            {% else %}bg-gray-700 border-2 border-gray-600{% endif %}">
+                    {% if is_completed %}
+                    <svg class="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                    </svg>
+                    {% elif is_failed %}
+                    <svg class="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                    {% elif is_active %}
+                    <svg class="w-4 h-4 text-cyan-400 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    {% else %}
+                    <span class="text-gray-500 text-xs">{{ idx + 1 }}</span>
+                    {% endif %}
+                </div>
+                <span class="text-xs mt-1 {% if is_active %}text-cyan-400{% elif is_completed %}text-green-400{% elif is_failed %}text-red-400{% else %}text-gray-500{% endif %}">
+                    {{ stage|capitalize }}
+                </span>
+            </div>
+
+            {% if not loop.last %}
+            <div class="flex-1 h-0.5 mx-2 {% if idx < current_idx %}bg-green-500{% else %}bg-gray-600{% endif %}"></div>
+            {% endif %}
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Job Details -->
+    <div class="bg-gray-700/50 rounded p-3 space-y-2 text-sm">
+        <div class="flex justify-between">
+            <span class="text-gray-400">SCAD File:</span>
+            <span class="text-gray-100">{{ job.scad_path }}</span>
+        </div>
+        <div class="flex justify-between">
+            <span class="text-gray-400">Profile:</span>
+            <span class="text-gray-100">{{ job.profile }}</span>
+        </div>
+        {% if job.machine %}
+        <div class="flex justify-between">
+            <span class="text-gray-400">Machine:</span>
+            <span class="text-gray-100">{{ job.machine[:25] }}{% if job.machine|length > 25 %}...{% endif %}</span>
+        </div>
+        {% endif %}
+        {% if job.scad_params %}
+        <div class="flex justify-between">
+            <span class="text-gray-400">Parameters:</span>
+            <span class="text-gray-100">{{ job.scad_params|length }} customized</span>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Result Display -->
+    {% if job.pipeline_status.value == 'completed' %}
+    <div class="mt-4 bg-green-500/20 border border-green-500 rounded p-4">
+        <div class="flex items-center gap-2 text-green-400 font-medium mb-2">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+            Pipeline Complete!
+        </div>
+        {% if job.output_path %}
+        <p class="text-gray-300 text-sm mb-2">GCode ready:</p>
+        <code class="text-xs text-cyan-400 bg-gray-900 px-2 py-1 rounded block overflow-x-auto">{{ job.output_path }}</code>
+        {% endif %}
+        {% if job.print_time_seconds or job.filament_grams %}
+        <div class="mt-3 flex gap-4 text-sm">
+            {% if job.print_time_seconds %}
+            <span class="text-gray-300">
+                <span class="text-gray-500">Time:</span>
+                {{ (job.print_time_seconds // 3600) }}h {{ ((job.print_time_seconds % 3600) // 60) }}m
+            </span>
+            {% endif %}
+            {% if job.filament_grams %}
+            <span class="text-gray-300">
+                <span class="text-gray-500">Filament:</span>
+                {{ "%.1f"|format(job.filament_grams) }}g
+            </span>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+    {% elif job.pipeline_status.value == 'failed' %}
+    <div class="mt-4 bg-red-500/20 border border-red-500 rounded p-4">
+        <div class="flex items-center gap-2 text-red-400 font-medium mb-2">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+            Pipeline Failed
+        </div>
+        {% if job.error_message %}
+        <p class="text-gray-300 text-sm">{{ job.error_message }}</p>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- Start New Pipeline Button (shown after completion/failure) -->
+    {% if is_terminal %}
+    <div class="mt-4 flex justify-end">
+        <button type="button"
+                onclick="document.getElementById('pipeline-status').classList.add('hidden'); htmx.ajax('GET', '/ui/pipeline/form', {target: '#pipeline-form', swap: 'innerHTML'});"
+                class="bg-cyan-600 hover:bg-cyan-500 text-white px-4 py-2 rounded text-sm transition-colors">
+            Start New Pipeline
+        </button>
+    </div>
+    {% endif %}
+</div>

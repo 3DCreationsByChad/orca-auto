@@ -1,0 +1,107 @@
+<div data-step="2">
+    <h2 class="text-xl font-semibold text-white mb-6">Step 2: Import Printer Profiles</h2>
+
+    <div class="bg-gray-700/50 rounded-lg p-5 mb-6">
+        <div class="flex items-center justify-between mb-4">
+            <h3 class="text-sm font-medium text-gray-300">Imported Profiles</h3>
+            <span id="profile-count" class="text-xs text-gray-500">
+                {% if profile_count > 0 %}
+                {{ profile_count }} profile{% if profile_count != 1 %}s{% endif %} imported
+                {% else %}
+                No profiles imported yet
+                {% endif %}
+            </span>
+        </div>
+
+        <div id="profile-list" class="space-y-2 max-h-48 overflow-y-auto">
+            {% if profiles %}
+            {% for profile in profiles %}
+            <div class="flex items-center justify-between bg-gray-600/50 px-3 py-2 rounded text-sm">
+                <span class="text-gray-200">{{ profile.name }}</span>
+                <span class="text-xs text-gray-400">({{ profile.type }})</span>
+            </div>
+            {% endfor %}
+            {% else %}
+            <p class="text-gray-500 text-sm text-center py-2 italic">
+                Import a .orca_printer bundle to add machine profiles
+            </p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- File Upload -->
+    <div class="bg-gray-700/30 border-2 border-dashed border-gray-600 rounded-lg p-6 text-center">
+        <form id="profile-upload-form"
+              hx-encoding="multipart/form-data"
+              hx-post="/profiles/import"
+              hx-target="#import-result"
+              hx-swap="innerHTML">
+
+            <svg class="w-10 h-10 text-gray-500 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+            </svg>
+
+            <label class="block">
+                <span class="text-gray-400 text-sm">Select a .orca_printer file to import</span>
+                <input type="file"
+                       name="file"
+                       accept=".orca_printer"
+                       class="block w-full text-sm text-gray-400 mt-2
+                              file:mr-4 file:py-2 file:px-4
+                              file:rounded-lg file:border-0
+                              file:text-sm file:font-semibold
+                              file:bg-cyan-500/20 file:text-cyan-400
+                              hover:file:bg-cyan-500/30
+                              cursor-pointer">
+            </label>
+
+            <button type="submit"
+                    class="mt-4 bg-gray-600 hover:bg-gray-500 text-white font-medium px-4 py-2 rounded-lg transition-colors text-sm">
+                Import Profiles
+            </button>
+        </form>
+
+        <div id="import-result" class="mt-4"></div>
+    </div>
+
+    <!-- Navigation -->
+    <div class="mt-8 flex justify-between">
+        <button type="button"
+                hx-get="/ui/setup/step/paths"
+                hx-target="#wizard-content"
+                hx-swap="innerHTML"
+                class="text-gray-400 hover:text-gray-300 font-medium px-4 py-2.5 transition-colors flex items-center">
+            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+            </svg>
+            Back
+        </button>
+
+        <button type="button"
+                hx-get="/ui/setup/step/complete"
+                hx-target="#wizard-content"
+                hx-swap="innerHTML"
+                class="bg-cyan-500 hover:bg-cyan-600 text-white font-semibold px-6 py-2.5 rounded-lg transition-colors flex items-center">
+            {% if profile_count > 0 %}
+            Continue
+            {% else %}
+            Skip for Now
+            {% endif %}
+            <svg class="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+            </svg>
+        </button>
+    </div>
+</div>
+
+<script>
+    // After successful profile import, refresh the profile list
+    document.body.addEventListener('htmx:afterOnLoad', function(event) {
+        if (event.detail.elt.id === 'profile-upload-form') {
+            // Refresh the profiles step to show updated list
+            setTimeout(function() {
+                htmx.ajax('GET', '/ui/setup/step/profiles', {target: '#wizard-content', swap: 'innerHTML'});
+            }, 1500);
+        }
+    });
+</script>

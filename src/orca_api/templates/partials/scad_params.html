@@ -1,0 +1,155 @@
+{% if success_message %}
+<div class="mb-4 bg-green-500/20 border border-green-500 text-green-400 px-4 py-2 rounded">
+    {{ success_message }}
+</div>
+{% endif %}
+
+{% if error_message %}
+<div class="mb-4 bg-red-500/20 border border-red-500 text-red-400 px-4 py-2 rounded">
+    {{ error_message }}
+</div>
+{% endif %}
+
+<div class="mb-4 pb-4 border-b border-gray-700">
+    <h3 class="text-lg font-medium text-cyan-400">{{ scad_file.name }}</h3>
+    <p class="text-sm text-gray-500">{{ scad_file.path }}</p>
+</div>
+
+{% if scad_file.variables %}
+<form hx-post="/ui/scad/params/{{ scad_file.path }}"
+      hx-target="#params-panel"
+      hx-swap="innerHTML"
+      hx-indicator="#params-indicator"
+      class="space-y-4">
+
+    {% for var in scad_file.variables %}
+    <div class="bg-gray-700/50 rounded-lg p-4 border border-gray-600">
+        <div class="flex flex-col sm:flex-row sm:items-center gap-2 mb-2">
+            <label for="param-{{ var.name }}" class="font-medium text-gray-100 flex-shrink-0">
+                {{ var.name }}
+            </label>
+            <span class="text-xs text-gray-500 px-2 py-0.5 bg-gray-600 rounded">
+                {{ var.type.value }}
+            </span>
+        </div>
+
+        {% if var.description %}
+        <p class="text-sm text-gray-400 mb-3">{{ var.description }}</p>
+        {% endif %}
+
+        {% if var.type.value == 'boolean' %}
+        <!-- Boolean: Checkbox -->
+        <div class="flex items-center gap-2">
+            <input type="checkbox"
+                   id="param-{{ var.name }}"
+                   name="{{ var.name }}"
+                   value="true"
+                   {% if var.value %}checked{% endif %}
+                   class="rounded bg-gray-600 border-gray-500 text-cyan-500 focus:ring-cyan-500 focus:ring-offset-gray-800 w-5 h-5">
+            <span class="text-gray-400 text-sm">{{ 'Enabled' if var.value else 'Disabled' }}</span>
+        </div>
+
+        {% elif var.options %}
+        <!-- Dropdown: Select from options -->
+        <select id="param-{{ var.name }}"
+                name="{{ var.name }}"
+                class="w-full bg-gray-700 border border-gray-600 text-gray-100 rounded px-3 py-2 focus:ring-cyan-500 focus:border-cyan-500">
+            {% for option in var.options %}
+            <option value="{{ option }}" {% if var.value == option %}selected{% endif %}>{{ option }}</option>
+            {% endfor %}
+        </select>
+
+        {% elif var.type.value == 'number' and var.min_value is not none and var.max_value is not none %}
+        <!-- Number with range: Slider + Number input -->
+        <div class="flex items-center gap-4">
+            <input type="range"
+                   id="param-{{ var.name }}-slider"
+                   min="{{ var.min_value }}"
+                   max="{{ var.max_value }}"
+                   {% if var.step %}step="{{ var.step }}"{% else %}step="1"{% endif %}
+                   value="{{ var.value }}"
+                   oninput="document.getElementById('param-{{ var.name }}').value = this.value"
+                   class="flex-1 h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-cyan-500">
+            <input type="number"
+                   id="param-{{ var.name }}"
+                   name="{{ var.name }}"
+                   min="{{ var.min_value }}"
+                   max="{{ var.max_value }}"
+                   {% if var.step %}step="{{ var.step }}"{% else %}step="any"{% endif %}
+                   value="{{ var.value }}"
+                   oninput="document.getElementById('param-{{ var.name }}-slider').value = this.value"
+                   class="w-24 bg-gray-700 border border-gray-600 text-gray-100 rounded px-3 py-2 text-center focus:ring-cyan-500 focus:border-cyan-500">
+            <span class="text-gray-500 text-xs">[{{ var.min_value }}:{{ var.max_value }}]</span>
+        </div>
+
+        {% elif var.type.value == 'number' %}
+        <!-- Number: Simple input -->
+        <input type="number"
+               id="param-{{ var.name }}"
+               name="{{ var.name }}"
+               step="any"
+               value="{{ var.value }}"
+               class="w-full bg-gray-700 border border-gray-600 text-gray-100 rounded px-3 py-2 focus:ring-cyan-500 focus:border-cyan-500">
+
+        {% elif var.type.value == 'vector' %}
+        <!-- Vector: Text input for comma-separated values -->
+        <div class="space-y-1">
+            <input type="text"
+                   id="param-{{ var.name }}"
+                   name="{{ var.name }}"
+                   value="{{ var.value | join(', ') if var.value is iterable and var.value is not string else var.value }}"
+                   placeholder="e.g., 10, 20, 30"
+                   class="w-full bg-gray-700 border border-gray-600 text-gray-100 rounded px-3 py-2 focus:ring-cyan-500 focus:border-cyan-500">
+            <p class="text-xs text-gray-500">Enter comma-separated values (e.g., 10, 20, 30)</p>
+        </div>
+
+        {% else %}
+        <!-- String: Text input -->
+        <input type="text"
+               id="param-{{ var.name }}"
+               name="{{ var.name }}"
+               value="{{ var.value }}"
+               class="w-full bg-gray-700 border border-gray-600 text-gray-100 rounded px-3 py-2 focus:ring-cyan-500 focus:border-cyan-500">
+        {% endif %}
+
+        {% if var.value != var.default_value %}
+        <p class="text-xs text-gray-500 mt-2">Default: {{ var.default_value }}</p>
+        {% endif %}
+    </div>
+    {% endfor %}
+
+    <!-- Action buttons -->
+    <div class="flex flex-wrap gap-3 pt-4 border-t border-gray-700">
+        <button type="submit"
+                class="flex-1 bg-cyan-600 hover:bg-cyan-500 text-white px-4 py-2 rounded transition-colors font-medium">
+            Save Changes
+        </button>
+        <button type="button"
+                hx-post="/ui/scad/reset/{{ scad_file.path }}"
+                hx-target="#params-panel"
+                hx-swap="innerHTML"
+                hx-indicator="#params-indicator"
+                hx-confirm="Reset all parameters to their default values?"
+                class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded transition-colors">
+            Reset to Defaults
+        </button>
+        <button type="button"
+                hx-post="/ui/scad/export/{{ scad_file.path }}"
+                hx-target="#params-panel"
+                hx-swap="innerHTML"
+                hx-indicator="#params-indicator"
+                class="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded transition-colors font-medium">
+            Export STL
+        </button>
+    </div>
+</form>
+
+{% else %}
+<div class="text-gray-500 text-center py-8">
+    <svg class="mx-auto h-12 w-12 text-gray-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+    </svg>
+    <p>No customizable parameters found</p>
+    <p class="text-xs mt-1">This file doesn't contain OpenSCAD customizer variables</p>
+</div>
+{% endif %}

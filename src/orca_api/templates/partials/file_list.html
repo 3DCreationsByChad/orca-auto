@@ -1,0 +1,203 @@
+<!-- Batch controls - only show when sliceable files exist -->
+{% set file_count = files | selectattr("is_dir", "false") | list | length %}
+{% if file_count > 0 %}
+<div class="bg-gray-700/50 px-3 py-2 rounded-t-lg border-b border-gray-600 flex flex-wrap items-center justify-between gap-2">
+    <div class="flex items-center gap-2">
+        <input type="checkbox" id="select-all"
+               class="rounded bg-gray-600 border-gray-500 text-cyan-500 focus:ring-cyan-500 focus:ring-offset-gray-800"
+               onclick="document.querySelectorAll('.file-checkbox').forEach(cb => cb.checked = this.checked)">
+        <label for="select-all" class="text-sm text-gray-300 cursor-pointer">Select All</label>
+    </div>
+    <div id="batch-controls" class="flex flex-wrap items-center gap-2">
+        <input type="number" id="batch-copies" value="1" min="1" max="99"
+               class="w-14 text-sm bg-gray-700 border border-gray-600 text-gray-100 rounded px-2 py-1 text-center focus:ring-cyan-500 focus:border-cyan-500"
+               title="Number of copies">
+        <select id="batch-machine" class="text-xs bg-gray-700 border border-gray-600 text-gray-100 rounded px-2 py-1 focus:ring-cyan-500 focus:border-cyan-500 max-w-[220px] truncate"
+                title="Machine profile"
+                hx-get="/ui/profiles/process/{value}"
+                hx-target="#batch-profile"
+                hx-trigger="change"
+                hx-swap="innerHTML"
+                onchange="updateBatchFilaments(this.value)">
+            {% for machine in machines %}
+            <option value="{{ machine.name }}">{{ machine.name }}{% if machine.source == "imported" %} *{% endif %}</option>
+            {% endfor %}
+        </select>
+        <select id="batch-profile" class="text-sm bg-gray-700 border border-gray-600 text-gray-100 rounded px-2 py-1 focus:ring-cyan-500 focus:border-cyan-500 max-w-[200px] truncate"
+                title="Slicing profile">
+            {% for profile in profiles %}
+            <option value="{{ profile.name }}">{{ profile.name }}{% if profile.source == "imported" %} *{% endif %}</option>
+            {% endfor %}
+        </select>
+        <select id="batch-filament" class="text-xs bg-gray-700 border border-gray-600 text-gray-100 rounded px-2 py-1 focus:ring-cyan-500 focus:border-cyan-500 max-w-[200px] truncate"
+                title="Filament profile">
+            {% for filament in filaments %}
+            <option value="{{ filament.name }}">{{ filament.name }}{% if filament.source == "imported" %} *{% endif %}</option>
+            {% endfor %}
+        </select>
+        <button type="button"
+                onclick="sliceSelected()"
+                class="bg-cyan-600 hover:bg-cyan-500 text-white text-sm px-3 py-1 rounded transition-colors whitespace-nowrap">
+            Slice Selected
+        </button>
+    </div>
+</div>
+{% endif %}
+
+<!-- Parent directory link (if not at root) -->
+{% if current_path %}
+<div class="border-b border-gray-700 py-2 px-3 hover:bg-gray-700/50 cursor-pointer flex items-center gap-2 transition-colors"
+     hx-get="/ui/browse/{{ "/".join(current_path.split("/")[:-1]) }}"
+     hx-target="#file-list"
+     hx-swap="innerHTML">
+    <span class="w-5"></span>
+    <span class="text-cyan-400">&#128193;</span>
+    <span class="text-cyan-400 hover:text-cyan-300">..</span>
+    <span class="text-gray-500 text-sm">(parent directory)</span>
+</div>
+{% endif %}
+
+<!-- File/folder list -->
+{% for file in files %}
+{% set ext = file.name.lower().split(".")[-1] if "." in file.name else "" %}
+{% set is_sliceable = not file.is_dir and ext in ["stl", "obj", "amf", "3mf"] %}
+<div class="border-b border-gray-700 py-2 px-3 hover:bg-gray-700/50 transition-colors">
+    <div class="flex flex-wrap items-center gap-2">
+        <!-- Checkbox for sliceable files only -->
+        {% if is_sliceable %}
+        <input type="checkbox" class="file-checkbox rounded bg-gray-600 border-gray-500 text-cyan-500 focus:ring-cyan-500 focus:ring-offset-gray-800 flex-shrink-0" value="{{ file.path }}"
+               name="selected_files">
+        {% else %}
+        <span class="w-5 flex-shrink-0"></span>
+        {% endif %}
+
+        <div class="flex-1 min-w-0 flex flex-wrap justify-between items-center gap-2 {% if file.is_dir %}cursor-pointer{% endif %}"
+             {% if file.is_dir %}
+             hx-get="/ui/browse/{{ file.path }}"
+             hx-target="#file-list"
+             hx-swap="innerHTML"
+             {% endif %}>
+            <div class="flex items-center gap-2 min-w-0">
+                {% if file.is_dir %}
+                    <span class="text-cyan-400 flex-shrink-0">&#128193;</span>
+                    <span class="text-cyan-400 hover:text-cyan-300 truncate">{{ file.name }}</span>
+                    {% if file.file_count is not none %}
+                    <span class="text-gray-500 text-xs flex-shrink-0">({{ file.file_count }} files)</span>
+                    {% endif %}
+                {% else %}
+                    <span class="text-gray-500 flex-shrink-0">&#128196;</span>
+                    <span class="text-gray-100 truncate">{{ file.name }}</span>
+                    <span class="text-gray-500 text-xs flex-shrink-0">{{ (file.size / 1024)|round(1) }} KB</span>
+                    {% if not is_sliceable %}
+                    <span class="text-gray-500 text-xs italic flex-shrink-0">(not sliceable)</span>
+                    {% endif %}
+                {% endif %}
+            </div>
+
+            <!-- Individual slice controls for sliceable files only -->
+            {% if is_sliceable %}
+            <form class="flex flex-wrap items-center gap-1 flex-shrink-0 individual-slice-form"
+                  hx-post="/ui/slice"
+                  hx-target="#job-list"
+                  hx-swap="outerHTML">
+                <input type="hidden" name="file_path" value="{{ file.path }}">
+                <input type="number" name="copies" value="1" min="1" max="99"
+                       class="w-12 text-xs bg-gray-700 border border-gray-600 text-gray-100 rounded px-1 py-1 text-center focus:ring-cyan-500 focus:border-cyan-500"
+                       title="Number of copies">
+                <select name="machine" class="text-xs bg-gray-700 border border-gray-600 text-gray-100 rounded px-1 py-1 focus:ring-cyan-500 focus:border-cyan-500 max-w-[140px] individual-machine"
+                        title="Machine profile"
+                        onchange="updateIndividualDropdowns(this)">
+                    {% for machine in machines %}
+                    <option value="{{ machine.name }}">{{ machine.name[:15] }}{% if machine.name|length > 15 %}...{% endif %}{% if machine.source == "imported" %} *{% endif %}</option>
+                    {% endfor %}
+                </select>
+                <select name="profile" class="text-xs bg-gray-700 border border-gray-600 text-gray-100 rounded px-1 py-1 focus:ring-cyan-500 focus:border-cyan-500 max-w-[140px] individual-profile">
+                    {% for profile in profiles %}
+                    <option value="{{ profile.name }}">{{ profile.name[:15] }}{% if profile.name|length > 15 %}...{% endif %}{% if profile.source == "imported" %} *{% endif %}</option>
+                    {% endfor %}
+                </select>
+                <select name="filament" class="text-xs bg-gray-700 border border-gray-600 text-gray-100 rounded px-1 py-1 focus:ring-cyan-500 focus:border-cyan-500 max-w-[140px] individual-filament">
+                    {% for filament in filaments %}
+                    <option value="{{ filament.name }}">{{ filament.name[:15] }}{% if filament.name|length > 15 %}...{% endif %}{% if filament.source == "imported" %} *{% endif %}</option>
+                    {% endfor %}
+                </select>
+                <button type="submit"
+                        class="bg-cyan-600 hover:bg-cyan-500 text-white text-xs px-2 py-1 rounded transition-colors whitespace-nowrap">
+                    Slice
+                </button>
+            </form>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endfor %}
+
+{% if not files %}
+<div class="text-gray-500 text-center py-8 italic">
+    No files found
+</div>
+{% endif %}
+
+<!-- Update breadcrumb via HTMX out-of-band -->
+<span id="current-path" hx-swap-oob="true" class="text-gray-100 font-mono">/{{ current_path or "root" }}</span>
+
+<script>
+function sliceSelected() {
+    const checkboxes = document.querySelectorAll(".file-checkbox:checked");
+    const machine = document.getElementById("batch-machine").value;
+    const profile = document.getElementById("batch-profile").value;
+    const filament = document.getElementById("batch-filament").value;
+    const copies = document.getElementById("batch-copies").value;
+    const files = Array.from(checkboxes).map(cb => cb.value);
+
+    if (files.length === 0) {
+        alert("Please select at least one file");
+        return;
+    }
+
+    fetch("/ui/slice-batch", {
+        method: "POST",
+        headers: {"Content-Type": "application/x-www-form-urlencoded"},
+        body: "profile=" + encodeURIComponent(profile) + "&" +
+              "machine=" + encodeURIComponent(machine) + "&" +
+              "filament=" + encodeURIComponent(filament) + "&" +
+              "copies=" + encodeURIComponent(copies) + "&" +
+              files.map(f => "files=" + encodeURIComponent(f)).join("&")
+    })
+    .then(response => response.text())
+    .then(html => {
+        document.getElementById("job-list").outerHTML = html;
+        document.querySelectorAll(".file-checkbox").forEach(cb => cb.checked = false);
+        document.getElementById("select-all").checked = false;
+    });
+}
+
+function updateBatchFilaments(machineName) {
+    fetch("/ui/profiles/filament/" + encodeURIComponent(machineName))
+        .then(response => response.text())
+        .then(html => {
+            document.getElementById("batch-filament").innerHTML = html;
+        });
+}
+
+function updateIndividualDropdowns(machineSelect) {
+    const form = machineSelect.closest("form");
+    const machineName = machineSelect.value;
+    const profileSelect = form.querySelector(".individual-profile");
+    const filamentSelect = form.querySelector(".individual-filament");
+    
+    // Update process profiles
+    fetch("/ui/profiles/process/" + encodeURIComponent(machineName))
+        .then(response => response.text())
+        .then(html => {
+            profileSelect.innerHTML = html;
+        });
+    
+    // Update filament profiles
+    fetch("/ui/profiles/filament/" + encodeURIComponent(machineName))
+        .then(response => response.text())
+        .then(html => {
+            filamentSelect.innerHTML = html;
+        });
+}
+</script>

@@ -1,0 +1,88 @@
+{% if scad_file and scad_file.variables %}
+<div class="space-y-3">
+    {% for var in scad_file.variables %}
+    <div class="flex items-center gap-3">
+        <label for="param-{{ var.name }}" class="text-sm text-gray-300 w-1/3 truncate" title="{{ var.name }}">
+            {{ var.name }}
+            {% if var.description %}
+            <span class="text-gray-500 text-xs block">{{ var.description[:50] }}{% if var.description|length > 50 %}...{% endif %}</span>
+            {% endif %}
+        </label>
+
+        <div class="flex-1">
+            {% if var.type.value == 'boolean' %}
+            <!-- Boolean: Checkbox -->
+            <input type="checkbox"
+                   id="param-{{ var.name }}"
+                   name="{{ var.name }}"
+                   value="true"
+                   {% if var.value %}checked{% endif %}
+                   class="rounded bg-gray-600 border-gray-500 text-cyan-500 focus:ring-cyan-500 focus:ring-offset-gray-800 w-5 h-5">
+
+            {% elif var.options %}
+            <!-- Dropdown: Select from options -->
+            <select id="param-{{ var.name }}"
+                    name="{{ var.name }}"
+                    class="w-full bg-gray-600 border border-gray-500 text-gray-100 rounded px-2 py-1 text-sm focus:ring-cyan-500 focus:border-cyan-500">
+                {% for option in var.options %}
+                <option value="{{ option }}" {% if var.value == option %}selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+            </select>
+
+            {% elif var.type.value == 'number' and var.min_value is not none and var.max_value is not none %}
+            <!-- Number with range: Slider + Number input -->
+            <div class="flex items-center gap-2">
+                <input type="range"
+                       id="param-{{ var.name }}-slider"
+                       min="{{ var.min_value }}"
+                       max="{{ var.max_value }}"
+                       {% if var.step %}step="{{ var.step }}"{% else %}step="1"{% endif %}
+                       value="{{ var.value }}"
+                       oninput="document.getElementById('param-{{ var.name }}').value = this.value"
+                       class="flex-1 h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer accent-cyan-500">
+                <input type="number"
+                       id="param-{{ var.name }}"
+                       name="{{ var.name }}"
+                       min="{{ var.min_value }}"
+                       max="{{ var.max_value }}"
+                       {% if var.step %}step="{{ var.step }}"{% else %}step="any"{% endif %}
+                       value="{{ var.value }}"
+                       oninput="document.getElementById('param-{{ var.name }}-slider').value = this.value"
+                       class="w-20 bg-gray-600 border border-gray-500 text-gray-100 rounded px-2 py-1 text-sm text-center focus:ring-cyan-500 focus:border-cyan-500">
+            </div>
+
+            {% elif var.type.value == 'number' %}
+            <!-- Number: Simple input -->
+            <input type="number"
+                   id="param-{{ var.name }}"
+                   name="{{ var.name }}"
+                   step="any"
+                   value="{{ var.value }}"
+                   class="w-full bg-gray-600 border border-gray-500 text-gray-100 rounded px-2 py-1 text-sm focus:ring-cyan-500 focus:border-cyan-500">
+
+            {% elif var.type.value == 'vector' %}
+            <!-- Vector: Text input for comma-separated values -->
+            <input type="text"
+                   id="param-{{ var.name }}"
+                   name="{{ var.name }}"
+                   value="{{ var.value | join(', ') if var.value is iterable and var.value is not string else var.value }}"
+                   placeholder="e.g., 10, 20, 30"
+                   class="w-full bg-gray-600 border border-gray-500 text-gray-100 rounded px-2 py-1 text-sm focus:ring-cyan-500 focus:border-cyan-500">
+
+            {% else %}
+            <!-- String: Text input -->
+            <input type="text"
+                   id="param-{{ var.name }}"
+                   name="{{ var.name }}"
+                   value="{{ var.value }}"
+                   class="w-full bg-gray-600 border border-gray-500 text-gray-100 rounded px-2 py-1 text-sm focus:ring-cyan-500 focus:border-cyan-500">
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<p class="text-gray-500 text-sm text-center py-4">
+    No customizable parameters found in this SCAD file
+</p>
+{% endif %}

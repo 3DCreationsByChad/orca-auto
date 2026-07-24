@@ -1,0 +1,110 @@
+<!-- Auto-refresh every 3 seconds if any jobs are pending/running -->
+{% set has_active = jobs | selectattr('status.value', 'in', ['pending', 'running']) | list | length > 0 %}
+
+<div id="job-list"
+     {% if has_active %}
+     hx-get="/ui/jobs"
+     hx-trigger="every 3s"
+     hx-swap="outerHTML"
+     {% endif %}>
+
+{% if error %}
+<div class="bg-red-900/50 border border-red-700 text-red-400 px-3 py-2 rounded mb-3 text-sm">
+    {{ error }}
+</div>
+{% endif %}
+
+{% if message %}
+<div class="bg-emerald-900/50 border border-emerald-700 text-emerald-400 px-3 py-2 rounded mb-3 text-sm">
+    {{ message }}
+</div>
+{% endif %}
+
+<!-- Polling indicator -->
+{% if has_active %}
+<script>
+    document.getElementById('poll-indicator').className = 'w-2 h-2 rounded-full bg-cyan-500 animate-pulse';
+</script>
+{% else %}
+<script>
+    document.getElementById('poll-indicator').className = 'w-2 h-2 rounded-full bg-gray-600';
+</script>
+{% endif %}
+
+{% if jobs %}
+{% for job in jobs %}
+<div class="rounded-lg p-3 mb-2 border 
+    {% if job.status.value == 'pending' %}
+    bg-gray-700/50 border-gray-600
+    {% elif job.status.value == 'running' %}
+    bg-amber-900/30 border-amber-700
+    {% elif job.status.value == 'completed' %}
+    bg-emerald-900/30 border-emerald-700
+    {% elif job.status.value == 'failed' %}
+    bg-red-900/30 border-red-700
+    {% endif %}">
+    <div class="flex justify-between items-start">
+        <div class="flex-1 min-w-0">
+            <div class="font-medium text-sm text-gray-100 truncate" title="{{ job.input_path }}">
+                {{ job.input_path.split('/')[-1] }}
+                {% if job.copies > 1 %}
+                <span class="text-cyan-400 text-xs ml-1">({{ job.copies }}x)</span>
+                {% endif %}
+            </div>
+            <div class="text-xs text-gray-400 mt-1">
+                <span class="font-mono text-gray-500">{{ job.id[:8] }}</span>
+                <span class="mx-1">·</span>
+                {{ job.profile }}
+                <span class="mx-1">·</span>
+                {{ job.created_at.strftime('%H:%M:%S') }}
+            </div>
+        </div>
+        <div class="text-right ml-2">
+            {% if job.status.value == 'pending' %}
+            <span class="inline-flex items-center px-2 py-1 rounded text-xs bg-gray-700 text-gray-300">
+                ⏳ Pending
+            </span>
+            {% elif job.status.value == 'running' %}
+            <span class="inline-flex items-center px-2 py-1 rounded text-xs bg-amber-900/50 text-amber-400 border border-amber-700">
+                <svg class="animate-spin h-3 w-3 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Slicing
+            </span>
+            {% elif job.status.value == 'completed' %}
+            <span class="inline-flex items-center px-2 py-1 rounded text-xs bg-emerald-900/50 text-emerald-400 border border-emerald-700">
+                ✓ Done
+            </span>
+            {% if job.print_time_seconds %}
+            <div class="text-xs mt-1 space-y-0.5">
+                <div class="text-cyan-400">
+                    ⏱ {{ (job.print_time_seconds / 60)|round(0)|int }}min
+                </div>
+                {% if job.filament_grams %}
+                <div class="text-cyan-400">
+                    ◉ {{ job.filament_grams|round(1) }}g
+                </div>
+                {% endif %}
+            </div>
+            {% endif %}
+            {% elif job.status.value == 'failed' %}
+            <span class="inline-flex items-center px-2 py-1 rounded text-xs bg-red-900/50 text-red-400 border border-red-700">
+                ✗ Failed
+            </span>
+            {% if job.error_message %}
+            <div class="text-xs text-red-400 mt-1 max-w-32 truncate" title="{{ job.error_message }}">
+                {{ job.error_message[:40] }}{% if job.error_message|length > 40 %}...{% endif %}
+            </div>
+            {% endif %}
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endfor %}
+{% else %}
+<div class="text-gray-500 text-sm text-center py-8 italic">
+    No jobs yet
+</div>
+{% endif %}
+</div>

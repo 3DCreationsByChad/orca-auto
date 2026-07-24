@@ -1,0 +1,156 @@
+<details class="bg-gray-800 rounded-lg border border-gray-700 mb-4">
+    <summary class="px-4 py-2 cursor-pointer hover:bg-gray-700/50 transition-colors flex items-center justify-between">
+        <span class="text-gray-100 font-semibold">Profile Manager</span>
+        <span class="text-gray-500 text-sm" id="profile-count">
+            {% set imported_count = imported_profiles | default([]) | length %}
+            {% if imported_count > 0 %}{{ imported_count }} imported{% else %}No imports{% endif %}
+        </span>
+    </summary>
+    
+    <div class="px-4 pb-4 pt-2 border-t border-gray-700">
+        <!-- Upload form - compact horizontal layout -->
+        <form id="profile-upload-form" class="mb-3" enctype="multipart/form-data">
+            <div class="flex flex-wrap items-center gap-2">
+                <input type="file" name="file" accept=".orca_printer" id="profile-file-input"
+                       class="flex-1 min-w-[200px] text-sm text-gray-400 file:mr-2 file:py-1.5 file:px-3 file:rounded file:border-0 file:text-sm file:bg-cyan-600 file:text-white hover:file:bg-cyan-500 file:cursor-pointer">
+                <button type="submit" id="import-btn"
+                        class="bg-cyan-600 hover:bg-cyan-500 text-white px-3 py-1.5 rounded text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap">
+                    Import
+                </button>
+            </div>
+            <p class="text-xs text-gray-500 mt-1">Accepts .orca_printer files (OrcaSlicer profile bundles)</p>
+        </form>
+
+        <!-- Status message -->
+        <div id="import-status" class="hidden mb-3 p-2 rounded text-sm"></div>
+
+        <!-- Imported profiles list - compact -->
+        <div id="imported-profiles-section">
+            <div id="imported-profiles-list" hx-get="/ui/profiles" hx-trigger="load" hx-swap="innerHTML">
+                <div class="text-gray-500 text-sm text-center py-2">
+                    Loading...
+                </div>
+            </div>
+        </div>
+    </div>
+</details>
+
+<script>
+document.getElementById("profile-upload-form").addEventListener("submit", async function(e) {
+    e.preventDefault();
+
+    const fileInput = document.getElementById("profile-file-input");
+    const importBtn = document.getElementById("import-btn");
+    const statusDiv = document.getElementById("import-status");
+
+    if (!fileInput.files || fileInput.files.length === 0) {
+        showStatus("Please select a file to import.", "error");
+        return;
+    }
+
+    const file = fileInput.files[0];
+    if (!file.name.endsWith(".orca_printer")) {
+        showStatus("Invalid file type. Only .orca_printer files are accepted.", "error");
+        return;
+    }
+
+    // Disable button and show loading
+    importBtn.disabled = true;
+    importBtn.textContent = "Importing...";
+    hideStatus();
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+        const response = await fetch("/api/profiles/import", {
+            method: "POST",
+            body: formData
+        });
+
+        const result = await response.json();
+
+        if (response.ok && result.success) {
+            let msg = "Imported " + result.imported_count + " profile(s)";
+            if (result.profiles && result.profiles.length > 0) {
+                msg += ": " + result.profiles.map(p => p.name).join(", ");
+            }
+            showStatus(msg, "success");
+
+            // Refresh imported profiles list
+            htmx.trigger("#imported-profiles-list", "htmx:load");
+
+            // Refresh file browser to update profile dropdowns
+            htmx.ajax("GET", "/ui/browse/" + (document.getElementById("current-path").textContent.replace(/^\//, "") || ""), {target: "#file-list", swap: "innerHTML"});
+
+            // Clear file input
+            fileInput.value = "";
+            
+            // Open the details if closed
+            document.querySelector("#imported-profiles-section").closest("details").open = true;
+        } else {
+            let errorMsg = "Import failed";
+            if (result.detail) {
+                errorMsg = result.detail;
+            } else if (result.errors && result.errors.length > 0) {
+                errorMsg = result.errors.join(", ");
+            }
+            showStatus(errorMsg, "error");
+        }
+    } catch (err) {
+        showStatus("Network error: " + err.message, "error");
+    } finally {
+        importBtn.disabled = false;
+        importBtn.textContent = "Import";
+    }
+});
+
+function showStatus(message, type) {
+    const statusDiv = document.getElementById("import-status");
+    statusDiv.textContent = message;
+    statusDiv.classList.remove("hidden", "bg-green-900/50", "text-green-300", "bg-red-900/50", "text-red-300");
+
+    if (type === "success") {
+        statusDiv.classList.add("bg-green-900/50", "text-green-300");
+    } else {
+        statusDiv.classList.add("bg-red-900/50", "text-red-300");
+    }
+    statusDiv.classList.remove("hidden");
+}
+
+function hideStatus() {
+    document.getElementById("import-status").classList.add("hidden");
+}
+
+async function deleteProfile(name, btn) {
+    if (!confirm("Delete profile \"" + name + "\"?")) {
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = "...";
+
+    try {
+        const response = await fetch("/api/profiles/imported/" + encodeURIComponent(name), {
+            method: "DELETE"
+        });
+
+        if (response.ok) {
+            showStatus("Profile \"" + name + "\" deleted.", "success");
+            // Refresh imported profiles list
+            htmx.trigger("#imported-profiles-list", "htmx:load");
+            // Refresh file browser to update profile dropdowns
+            htmx.ajax("GET", "/ui/browse/" + (document.getElementById("current-path").textContent.replace(/^\//, "") || ""), {target: "#file-list", swap: "innerHTML"});
+        } else {
+            const result = await response.json();
+            showStatus(result.detail || "Failed to delete profile.", "error");
+            btn.disabled = false;
+            btn.textContent = "Delete";
+        }
+    } catch (err) {
+        showStatus("Network error: " + err.message, "error");
+        btn.disabled = false;
+        btn.textContent = "Delete";
+    }
+}
+</script>

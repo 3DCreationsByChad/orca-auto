@@ -1,0 +1,74 @@
+<div data-step="1">
+    <h2 class="text-xl font-semibold text-white mb-6">Step 1: Configure Paths</h2>
+
+    <form hx-post="/ui/setup/validate-paths" hx-target="#wizard-content" hx-swap="innerHTML">
+        <div class="space-y-5">
+            <!-- Models Path -->
+            <div>
+                <label for="models_path" class="block text-sm font-medium text-gray-300 mb-2">
+                    STL Library Path
+                </label>
+                <input type="text"
+                       id="models_path"
+                       name="models_path"
+                       value="{{ models_path or '' }}"
+                       placeholder="/data/models"
+                       class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent">
+                <p class="text-xs text-gray-500 mt-1">Directory where your 3D model files (STL, OBJ, 3MF) are stored</p>
+                {% if errors and errors.models_path %}
+                <p class="text-red-400 text-sm mt-1">{{ errors.models_path }}</p>
+                {% endif %}
+            </div>
+
+            <!-- Sliced Path -->
+            <div>
+                <label for="sliced_path" class="block text-sm font-medium text-gray-300 mb-2">
+                    Sliced Output Path
+                </label>
+                <input type="text"
+                       id="sliced_path"
+                       name="sliced_path"
+                       value="{{ sliced_path or '' }}"
+                       placeholder="/data/output"
+                       class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent">
+                <p class="text-xs text-gray-500 mt-1">Directory where sliced G-code files will be saved</p>
+                {% if errors and errors.sliced_path %}
+                <p class="text-red-400 text-sm mt-1">{{ errors.sliced_path }}</p>
+                {% endif %}
+            </div>
+
+            <!-- OrcaSlicer Binary -->
+            <div>
+                <label for="orcaslicer_bin" class="block text-sm font-medium text-gray-300 mb-2">
+                    OrcaSlicer Binary Path
+                </label>
+                <input type="text"
+                       id="orcaslicer_bin"
+                       name="orcaslicer_bin"
+                       value="{{ orcaslicer_bin or '' }}"
+                       placeholder="/usr/local/bin/orcaslicer"
+                       class="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent">
+                <p class="text-xs text-gray-500 mt-1">Path to the OrcaSlicer executable (or orca-slicer on some systems)</p>
+                {% if errors and errors.orcaslicer_bin %}
+                <p class="text-red-400 text-sm mt-1">{{ errors.orcaslicer_bin }}</p>
+                {% endif %}
+            </div>
+        </div>
+
+        {% if errors and errors.general %}
+        <div class="bg-red-500/10 border border-red-500/30 rounded-lg p-4 mt-5">
+            <p class="text-red-400 text-sm">{{ errors.general }}</p>
+        </div>
+        {% endif %}
+
+        <div class="mt-8 flex justify-end">
+            <button type="submit"
+                    class="bg-cyan-500 hover:bg-cyan-600 text-white font-semibold px-6 py-2.5 rounded-lg transition-colors flex items-center">
+                Validate & Continue
+                <svg class="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                </svg>
+            </button>
+        </div>
+    </form>
+</div>

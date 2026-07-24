@@ -1,0 +1,144 @@
+<form hx-post="/ui/pipeline/start"
+      hx-target="#pipeline-status"
+      hx-swap="innerHTML"
+      hx-indicator="#form-indicator"
+      id="pipeline-config-form">
+
+    <!-- SCAD File Selection -->
+    <div class="mb-4">
+        <label for="scad_path" class="block text-sm font-medium text-gray-300 mb-1">
+            SCAD File
+        </label>
+        <select id="scad_path"
+                name="scad_path"
+                required
+                hx-get="/ui/pipeline/params/{value}"
+                hx-trigger="change"
+                hx-target="#pipeline-params"
+                hx-swap="innerHTML"
+                hx-indicator="#params-indicator"
+                class="w-full bg-gray-700 border border-gray-600 text-gray-100 rounded px-3 py-2 focus:ring-cyan-500 focus:border-cyan-500">
+            <option value="">-- Select a SCAD file --</option>
+            {% for file in scad_files %}
+            <option value="{{ file.path }}" {% if selected_scad == file.path %}selected{% endif %}>
+                {{ file.name }}{% if '/' in file.path or '\\' in file.path %} ({{ file.path }}){% endif %}
+            </option>
+            {% endfor %}
+        </select>
+        {% if not scad_files %}
+        <p class="text-xs text-gray-500 mt-1">No SCAD files found in models directory</p>
+        {% endif %}
+    </div>
+
+    <!-- Parameter Editor -->
+    <div class="mb-4">
+        <div class="flex justify-between items-center mb-2">
+            <label class="block text-sm font-medium text-gray-300">Parameters</label>
+            <span id="params-indicator" class="htmx-indicator">
+                <svg class="animate-spin h-4 w-4 text-cyan-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+            </span>
+        </div>
+        <div id="pipeline-params" class="bg-gray-700/50 rounded-lg p-3 border border-gray-600 max-h-64 overflow-y-auto">
+            {% if scad_file and scad_file.variables %}
+            {% include "partials/pipeline_params.html" %}
+            {% else %}
+            <p class="text-gray-500 text-sm text-center py-4">
+                Select a SCAD file to see available parameters
+            </p>
+            {% endif %}
+        </div>
+    </div>
+
+    <hr class="border-gray-700 my-4">
+
+    <!-- Slice Settings -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+        <!-- Profile -->
+        <div>
+            <label for="profile" class="block text-sm font-medium text-gray-300 mb-1">
+                Profile
+            </label>
+            <select id="profile"
+                    name="profile"
+                    required
+                    class="w-full bg-gray-700 border border-gray-600 text-gray-100 rounded px-3 py-2 focus:ring-cyan-500 focus:border-cyan-500">
+                {% for p in profiles %}
+                <option value="{{ p.name }}">
+                    {{ p.name[:25] }}{% if p.name|length > 25 %}...{% endif %}
+                    {% if p.source == "imported" %}*{% endif %}
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <!-- Machine -->
+        <div>
+            <label for="machine" class="block text-sm font-medium text-gray-300 mb-1">
+                Machine
+            </label>
+            <select id="machine"
+                    name="machine"
+                    hx-get="/ui/profiles/process/{value}"
+                    hx-trigger="change"
+                    hx-target="#profile"
+                    hx-swap="innerHTML"
+                    class="w-full bg-gray-700 border border-gray-600 text-gray-100 rounded px-3 py-2 focus:ring-cyan-500 focus:border-cyan-500">
+                {% for m in machines %}
+                <option value="{{ m.name }}">
+                    {{ m.name[:25] }}{% if m.name|length > 25 %}...{% endif %}
+                    {% if m.source == "imported" %}*{% endif %}
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <!-- Filament -->
+        <div>
+            <label for="filament" class="block text-sm font-medium text-gray-300 mb-1">
+                Filament
+            </label>
+            <select id="filament"
+                    name="filament"
+                    class="w-full bg-gray-700 border border-gray-600 text-gray-100 rounded px-3 py-2 focus:ring-cyan-500 focus:border-cyan-500">
+                {% for f in filaments %}
+                <option value="{{ f.name }}">
+                    {{ f.name[:25] }}{% if f.name|length > 25 %}...{% endif %}
+                    {% if f.source == "imported" %}*{% endif %}
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+    </div>
+
+    <!-- Submit Button -->
+    <div class="flex justify-end">
+        <button type="submit"
+                class="bg-green-600 hover:bg-green-500 text-white px-6 py-2 rounded font-medium transition-colors flex items-center gap-2"
+                onclick="document.getElementById('pipeline-status').classList.remove('hidden');">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+            Start Pipeline
+        </button>
+    </div>
+</form>
+
+<script>
+// Handle SCAD file selection to load params
+document.getElementById('scad_path').addEventListener('change', function() {
+    const path = this.value;
+    if (path) {
+        htmx.ajax('GET', '/ui/pipeline/params/' + encodeURIComponent(path), {
+            target: '#pipeline-params',
+            swap: 'innerHTML'
+        });
+    } else {
+        document.getElementById('pipeline-params').innerHTML =
+            '<p class="text-gray-500 text-sm text-center py-4">Select a SCAD file to see available parameters</p>';
+    }
+});
+</script>
