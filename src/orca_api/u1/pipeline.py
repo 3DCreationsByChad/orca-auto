@@ -14,6 +14,7 @@ from typing import Sequence
 
 import httpx
 
+from orca_api.u1.loaded_filament import LoadedFilament
 from orca_api.u1.moonraker_client import MoonrakerClient
 from orca_api.u1.slice import DEFAULT_DATADIR, slice_3mf
 from orca_api.u1.threemf_builder import U1Part, build_u1_3mf
@@ -35,6 +36,7 @@ def build_and_slice(
     workdir: Path | str,
     *,
     datadir: Path | str = DEFAULT_DATADIR,
+    loaded: Sequence[LoadedFilament | None] | None = None,
     **slice_kwargs: object,
 ) -> U1JobResult:
     """Build the multicolor project .3mf and slice it to G-code (no push).
@@ -47,7 +49,7 @@ def build_and_slice(
     """
     workdir = Path(workdir)
     workdir.mkdir(parents=True, exist_ok=True)
-    project = build_u1_3mf(list(parts), workdir / "job.3mf")
+    project = build_u1_3mf(list(parts), workdir / "job.3mf", datadir, loaded=loaded)
     result = slice_3mf(project, workdir / "job.gcode", datadir=datadir, **slice_kwargs)
     return U1JobResult(project_3mf=Path(project), gcode_path=result.gcode_path)
 
@@ -60,6 +62,7 @@ async def build_slice_push(
     api_key: str | None = None,
     mode: str = "queue",
     datadir: Path | str = DEFAULT_DATADIR,
+    read_filament: bool = True,
     transport: httpx.BaseTransport | None = None,
     **slice_kwargs: object,
 ) -> U1JobResult:
@@ -71,8 +74,18 @@ async def build_slice_push(
         mode: "queue" (upload + enqueue) or "start" (upload + print now).
         transport: Optional httpx transport (inject MockTransport in tests).
     """
-    job = build_and_slice(parts, workdir, datadir=datadir, **slice_kwargs)
     async with MoonrakerClient(moonraker_url, api_key=api_key, transport=transport) as mc:
+        loaded = None
+        if read_filament:
+            # ask the printer what is actually loaded *before* slicing -- afterwards
+            # the temperatures are already baked into the G-code
+            loaded = await mc.get_loaded_filaments()
+            for spool in loaded:
+                if spool is not None:
+                    logger.info("tool %d holds %s (%s)", spool.tool_index + 1,
+                                spool.label, spool.color)
+        job = build_and_slice(parts, workdir, datadir=datadir, loaded=loaded,
+                              **slice_kwargs)
         pushed = await mc.push(str(job.gcode_path), mode=mode)
     logger.info("pushed %s to %s as %s (mode=%s)", job.gcode_path, moonraker_url, pushed, mode)
     return U1JobResult(project_3mf=job.project_3mf, gcode_path=job.gcode_path, pushed_as=pushed)

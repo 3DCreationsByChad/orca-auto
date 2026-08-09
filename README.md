@@ -1,9 +1,46 @@
 # Orca Auto
 
-A web-based automation tool for OrcaSlicer that enables batch slicing of STL files with customizable profiles.
+Headless OrcaSlicer automation. Two things, sharing one slicing core:
+
+- a **web UI + REST API** for batch-slicing STL/3MF/SCAD against your own profiles, and
+- **`orca-auto u1`** — a command-line **multicolor pipeline for the Snapmaker U1** that
+  turns a JSON job spec into a queued print without a GUI anywhere in the loop.
+
+## Snapmaker U1 in 60 seconds
+
+The U1 is a 4-tool multicolor toolchanger. Assigning parts to tools normally means
+driving the slicer by hand. This makes it a file you can generate, diff, and script:
+
+```json
+{
+  "parts": [
+    { "stl": "shell.stl", "tool_index": 0, "filament": "PLA",                 "color": "#519F61" },
+    { "stl": "inlay.stl", "tool_index": 1, "filament": "Snapmaker PLA Matte @U1", "color": "#111111" }
+  ]
+}
+```
+
+```bash
+orca-auto u1 print job.json --moonraker http://<u1-host> --mode queue
+```
+
+That single command assembles a multicolor project `.3mf`, slices it headlessly, and
+drops the G-code straight into the printer's queue over Moonraker.
+
+It also asks the printer what is loaded and uses each spool's own tagged temperatures.
+
+**Filament assignments are real, not cosmetic.** Each slot's settings are resolved out
+of OrcaSlicer's installed Snapmaker bundle — `"PLA"` resolves to `Snapmaker PLA @U1` and
+brings its actual temperatures, flow, cooling and retraction with it. Name a filament the
+bundle doesn't have and it fails loudly rather than printing one material at another's
+temperature. [Full details below](#snapmaker-u1-slice-coordinator).
+
+Requires a U1 running Klipper/Moonraker (stock firmware is fine) and OrcaSlicer on the
+machine you run it from. No account, no cloud, no vendor slicer.
 
 ## Features
 
+- **Snapmaker U1 multicolor pipeline** - JSON job spec → project `.3mf` → headless slice → Moonraker queue, in one command
 - **Web UI** - Browse files, select profiles, and slice with one click
 - **Batch Slicing** - Select multiple files and slice them all at once
 - **Multi-Printer Support** - Import profiles for different printers and switch between them
@@ -12,7 +49,8 @@ A web-based automation tool for OrcaSlicer that enables batch slicing of STL fil
 - **Filament Selection** - Choose filaments with automatic filtering by printer compatibility
 - **Job Queue** - Background job processing with status tracking
 - **CLI Tool** - Command-line interface for scripting and automation
-- **Snapmaker U1 Slice-Coordinator** - Local build → slice → push pipeline that assembles a multicolor `.3mf` project and sends the resulting G-code straight to a U1's Moonraker instance (see [Snapmaker U1 Slice-Coordinator](#snapmaker-u1-slice-coordinator) below)
+- **Real filament resolution** - U1 tool assignments pull their settings from Snapmaker's own filament profiles, so a slot is heated like the material it claims to be
+- **Reads the spools you actually loaded** - RFID tags supply each spool's own temperatures, and a material mismatch stops the job instead of ruining it
 
 ## Screenshots
 
@@ -175,6 +213,65 @@ The pipeline is: **build** a multicolor project `.3mf` from your STLs + per-part
    ```
    STL paths resolve relative to the job file's directory unless given as absolute paths.
 
+   **`filament` names a real preset, and its settings are actually applied.** The
+   project `.3mf` this tool builds embeds a *fully resolved* config — that is what lets
+   it bypass OrcaSlicer's vendor-bundle compatibility check — which means OrcaSlicer
+   slices from the values embedded in the file, not from a preset name. So each slot's
+   settings are read out of OrcaSlicer's installed Snapmaker bundle and spliced in:
+   temperatures, bed temperature, flow, cooling, retraction, the lot.
+
+   Write either a bare material or a specific profile:
+
+   | `filament` | resolves to |
+   |---|---|
+   | `"PLA"` / `"ASA"` / `"PETG"` / `"TPU"` | `Snapmaker <material> @U1` |
+   | `"Snapmaker PLA Matte @U1"` | itself |
+   | `"PolyLite PLA @U1"` | itself |
+
+   List what your install actually offers:
+
+   ```python
+   from orca_api.u1.filament_presets import available_presets
+   print([n for n in available_presets("~/.config/OrcaSlicer") if n.endswith("@U1")])
+   ```
+
+   A filament with no matching preset raises `FilamentPresetError` listing the valid
+   options. That is deliberate: the alternative is a slot labelled one material and
+   heated like another, which slices into perfectly healthy-looking G-code and ruins
+   the print. Slots you don't assign keep the template's defaults.
+
+   **The printer gets the final say on temperature.** The U1 reads an RFID tag on
+   every Snapmaker spool and publishes it over Moonraker, and those tags carry the
+   manufacturer's own figures for that exact filament — which are not always what the
+   generic profile says. A PLA SnapSpeed spool tags **230 °C for the first layer and a
+   60 °C bed**, where `Snapmaker PLA @U1` says 220 °C / 55 °C. `orca-auto u1 print` asks
+   the printer what is loaded *before* slicing and uses the spool's own values.
+
+   See what your machine is holding right now:
+
+   ```bash
+   orca-auto u1 filaments --moonraker http://<u1-host>
+   ```
+   ```
+   tool 1: PLA SnapSpeed   #080A0D  first layer 230C / then 220C / bed 60C  (Snapmaker)
+   tool 2: PLA SnapSpeed   #F4C032  first layer 230C / then 220C / bed 60C  (Snapmaker)
+   tool 3: not tagged - the printer cannot identify it
+   tool 4: not tagged - the printer cannot identify it
+   ```
+
+   Three rules this follows:
+
+   - **Untagged spools keep the profile.** Third-party filament has no tag, and the
+     printer reports the slot as `NONE` — that is *unknown*, not empty and not
+     "probably PLA".
+   - **Absurd tags are ignored.** A temperature outside the spool's own declared
+     hotend range is treated as corrupt rather than sent to a heater.
+   - **Material mismatches are refused.** Ask for PLA on a tool holding ABS and the
+     job stops with the tool number, instead of printing one material at another's
+     temperature.
+
+   Pass `--no-read-filament` to skip all of this and use the profile as-is.
+
 2. **Slice only** (build the `.3mf` + G-code, no printer needed):
    ```bash
    orca-auto u1 slice job.json --out job.gcode --bin /usr/local/bin/orcaslicer
@@ -217,10 +314,12 @@ src/orca_api/            # FastAPI service (web UI + REST API)
 ├── templates/             # Jinja2 HTML templates (setup wizard, index, editors)
 └── u1/                    # Snapmaker U1 slice-coordinator (see above)
     ├── threemf_builder.py   # Assemble a multicolor project .3mf
-    ├── slice.py               # Headless OrcaSlicer CLI wrapper
-    ├── moonraker_client.py      # Async Moonraker REST client
-    ├── tool_map.py                # 4-tool color/filament assignment model
-    └── pipeline.py                 # build -> slice -> (optionally) push
+    ├── filament_presets.py    # Resolve real filament settings from the vendor bundle
+    ├── loaded_filament.py       # What the RFID tags say is physically in each tool
+    ├── slice.py                 # Headless OrcaSlicer CLI wrapper
+    ├── moonraker_client.py        # Async Moonraker REST client
+    ├── tool_map.py                  # 4-tool color/filament assignment model
+    └── pipeline.py                    # build -> slice -> (optionally) push
 
 src/orca_cli/             # `orca-auto` CLI (argparse)
 ├── cli.py                  # Subcommands, most of which are thin HTTP clients over the API

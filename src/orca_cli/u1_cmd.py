@@ -12,12 +12,34 @@ import json
 from argparse import Namespace  # re-exported for tests
 from pathlib import Path
 
+from orca_api.u1.loaded_filament import LoadedFilament
+from orca_api.u1.moonraker_client import MoonrakerClient
 from orca_api.u1.pipeline import build_and_slice, build_slice_push
 from orca_api.u1.threemf_builder import U1Part
 from orca_api.u1.tool_map import ToolAssignment
 
 __all__ = ["Namespace", "load_parts", "cmd_u1", "add_u1_subparser",
-           "build_and_slice", "build_slice_push"]
+           "build_and_slice", "build_slice_push", "read_loaded_filaments"]
+
+
+async def read_loaded_filaments(
+    moonraker_url: str, api_key: str | None = None
+) -> list[LoadedFilament | None]:
+    """Ask the printer which spools are loaded, one entry per tool."""
+    async with MoonrakerClient(moonraker_url, api_key=api_key) as mc:
+        return await mc.get_loaded_filaments()
+
+
+def _print_loaded(loaded: list[LoadedFilament | None]) -> None:
+    for index, spool in enumerate(loaded):
+        if spool is None:
+            print(f"  tool {index + 1}: not tagged - the printer cannot identify it")
+            continue
+        print(
+            f"  tool {index + 1}: {spool.label:<18} {spool.color}  "
+            f"first layer {spool.first_layer_temp}C / then {spool.other_layer_temp}C / "
+            f"bed {spool.bed_temp}C  ({spool.vendor})"
+        )
 
 
 def load_parts(job_path: Path | str) -> list[U1Part]:
@@ -55,7 +77,13 @@ def load_parts(job_path: Path | str) -> list[U1Part]:
 
 
 def cmd_u1(args: Namespace) -> int:
-    """Dispatch `orca-auto u1 {slice,print}`."""
+    """Dispatch `orca-auto u1 {slice,print,filaments}`."""
+    if args.subcommand == "filaments":
+        loaded = asyncio.run(read_loaded_filaments(args.moonraker, args.api_key))
+        print(f"Loaded filament reported by {args.moonraker}:")
+        _print_loaded(loaded)
+        return 0
+
     try:
         parts = load_parts(args.job)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
@@ -81,7 +109,8 @@ def cmd_u1(args: Namespace) -> int:
             build_slice_push(
                 parts, workdir,
                 moonraker_url=args.moonraker, api_key=args.api_key,
-                mode=args.mode, **slice_kw,
+                mode=args.mode, read_filament=getattr(args, "read_filament", True),
+                **slice_kw,
             )
         )
         print(f"Pushed {result.gcode_path} to {args.moonraker} as {result.pushed_as} (mode={args.mode})")
@@ -117,4 +146,11 @@ def add_u1_subparser(subparsers) -> None:
                     help="OrcaSlicer data dir (system bundle)")
     pr.add_argument("--bin", default="orcaslicer", help="OrcaSlicer executable")
     pr.add_argument("--display", default=":99", help="X DISPLAY for headless slice")
-    pr.set_defaults(func=cmd_u1)
+    pr.add_argument("--no-read-filament", dest="read_filament", action="store_false",
+                    help="Don't read the loaded spools' RFID tags; use the profile as-is")
+    pr.set_defaults(func=cmd_u1, read_filament=True)
+
+    fl = u1_sub.add_parser("filaments", help="Show which spools the U1 currently holds")
+    fl.add_argument("--moonraker", required=True, help="U1 Moonraker base URL")
+    fl.add_argument("--api-key", dest="api_key", default=None, help="Moonraker API key")
+    fl.set_defaults(func=cmd_u1)

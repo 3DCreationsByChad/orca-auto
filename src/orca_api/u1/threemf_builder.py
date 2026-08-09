@@ -13,14 +13,29 @@ from xml.sax.saxutils import escape
 
 import trimesh
 
+from orca_api.u1.filament_presets import (
+    DEFAULT_VENDOR,
+    resolve_filament_preset,
+    resolve_preset_name,
+)
+from orca_api.u1.loaded_filament import (
+    LoadedFilament,
+    check_material_match,
+)
 from orca_api.u1.tool_map import ToolAssignment, build_tool_map
 
-_FILAMENT_SETTINGS_BY_TYPE = {
-    "PETG": "Generic PETG @System",
-    "PLA": "Generic PLA @System",
-    "ABS": "Generic ABS @System",
-    "TPU": "Generic TPU @System",
-}
+_TOOL_COUNT = 4
+
+#: Config keys that are 4-element arrays for reasons that have nothing to do with
+#: filament -- bed corner coordinates, per-extruder hardware facts. A filament preset
+#: has no business rewriting these, and `printable_area` in particular would silently
+#: move one corner of the bed.
+_PRINTER_SCOPED_KEYS = frozenset({
+    "printable_area",
+    "extruder_offset",
+    "extruder_colour",
+    "nozzle_diameter",
+})
 
 _MODEL_NS = (
     'xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" '
@@ -63,22 +78,78 @@ def _load_template() -> dict:
     return json.loads(text)
 
 
-def _patch_project_settings(parts: Sequence[U1Part]) -> dict:
-    """Return a copy of the U1 template config with filament slots set per part."""
+def _overlay_loaded_spool(slots: dict, loaded: LoadedFilament) -> None:
+    """Apply a spool's own RFID-tagged temperatures over the resolved profile.
+
+    The tag is written by the filament's manufacturer for that exact spool, so it
+    beats the generic profile -- `Snapmaker PLA @U1` says 220C first layer while a
+    PLA SnapSpeed spool tags 230C. Values outside the spool's own declared hotend
+    range are treated as corrupt and ignored rather than sent to the heater.
+    """
+    i = loaded.tool_index
+    lo, hi = loaded.hotend_min_temp, loaded.hotend_max_temp
+
+    def sane(temp: int) -> bool:
+        return temp > 0 and (not (lo and hi) or lo <= temp <= hi)
+
+    if sane(loaded.first_layer_temp):
+        slots["nozzle_temperature_initial_layer"][i] = str(loaded.first_layer_temp)
+    if sane(loaded.other_layer_temp):
+        slots["nozzle_temperature"][i] = str(loaded.other_layer_temp)
+    if loaded.bed_temp > 0:
+        for key in ("hot_plate_temp", "hot_plate_temp_initial_layer"):
+            if key in slots:
+                slots[key][i] = str(loaded.bed_temp)
+
+
+def _patch_project_settings(
+    parts: Sequence[U1Part],
+    datadir: str | Path,
+    vendor: str = DEFAULT_VENDOR,
+    loaded: Sequence[LoadedFilament | None] | None = None,
+) -> dict:
+    """Return a copy of the U1 template config with each slot's filament resolved.
+
+    The project `.3mf` embeds a fully resolved config, so naming a preset is not
+    enough -- every per-filament value (temps, bed, flow, cooling, retraction) is
+    spliced into the slot from the vendor bundle's real profile.
+
+    Raises:
+        FilamentPresetError: if a requested filament has no preset. We refuse
+            rather than emit a slot labelled one material and heated like another.
+    """
     cfg = _load_template()
-    colour = list(cfg["filament_colour"])
-    ftype = list(cfg["filament_type"])
-    fsid = list(cfg["filament_settings_id"])
+    # every per-filament setting in the template is a 4-slot array, one per tool
+    slots = {
+        key: list(value)
+        for key, value in cfg.items()
+        if isinstance(value, list)
+        and len(value) == _TOOL_COUNT
+        and key not in _PRINTER_SCOPED_KEYS
+    }
+
     for part in parts:
         a = part.assignment
         i = a.tool_index
-        ftype[i] = a.filament
+        name = resolve_preset_name(a.filament, datadir, vendor)
+        preset = resolve_filament_preset(a.filament, datadir, vendor)
+
+        for key, value in preset.items():
+            if key not in slots:
+                continue  # not a per-filament setting in this template
+            if isinstance(value, list) and len(value) == 1:
+                slots[key][i] = value[0]
+
+        slots["filament_settings_id"][i] = name
         if a.color:
-            colour[i] = a.color
-        fsid[i] = _FILAMENT_SETTINGS_BY_TYPE.get(a.filament, fsid[i])
-    cfg["filament_colour"] = colour
-    cfg["filament_type"] = ftype
-    cfg["filament_settings_id"] = fsid
+            slots["filament_colour"][i] = a.color
+
+        spool = loaded[i] if loaded and i < len(loaded) else None
+        if spool is not None:
+            check_material_match(tool_index=i, requested=a.filament, loaded=spool)
+            _overlay_loaded_spool(slots, spool)
+
+    cfg.update(slots)
     return cfg
 
 
@@ -183,16 +254,29 @@ _ROOT_RELS = (
 )
 
 
-def build_u1_3mf(parts: Sequence[U1Part], out_path: str | Path) -> Path:
+def build_u1_3mf(
+    parts: Sequence[U1Part],
+    out_path: str | Path,
+    datadir: str | Path,
+    vendor: str = DEFAULT_VENDOR,
+    loaded: Sequence[LoadedFilament | None] | None = None,
+) -> Path:
     """Build a Snapmaker U1 multicolor project .3mf.
+
+    Args:
+        datadir: OrcaSlicer data dir holding the vendor bundle. Required, because
+            each slot's real filament settings are resolved out of it.
+        loaded: What the printer reports is physically loaded, one entry per tool.
+            Each tagged spool's own temperatures override the profile.
 
     Raises:
         ValueError: if the assignments are empty, have an out-of-range or
             duplicate tool index, or an empty filament (via build_tool_map).
+        FilamentPresetError: if a requested filament has no preset in the bundle.
     """
     build_tool_map([p.assignment for p in parts])  # validate; raises on bad input
     out = Path(out_path)
-    cfg = _patch_project_settings(parts)
+    cfg = _patch_project_settings(parts, datadir, vendor, loaded=loaded)
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("[Content_Types].xml", _CONTENT_TYPES)
         z.writestr("_rels/.rels", _ROOT_RELS)

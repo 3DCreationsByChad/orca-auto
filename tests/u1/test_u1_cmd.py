@@ -1,4 +1,6 @@
+import argparse
 import json
+from argparse import Namespace
 from pathlib import Path
 
 import pytest
@@ -75,3 +77,39 @@ def test_cmd_u1_print_invokes_build_slice_push(tmp_path, monkeypatch, capsys):
     rc = u1_cmd.cmd_u1(args)
     assert rc == 0
     assert "job.gcode" in capsys.readouterr().out
+
+
+def test_filaments_subcommand_reports_what_the_printer_holds(capsys, monkeypatch):
+    """`orca-auto u1 filaments` answers 'what is actually in the machine right now'."""
+    from orca_api.u1.loaded_filament import LoadedFilament
+
+    async def fake_read(url, api_key=None):
+        return [
+            LoadedFilament(0, "PLA", "SnapSpeed", "#080A0D", 230, 220, 60, 190, 230, "Snapmaker"),
+            None,
+            None,
+            None,
+        ]
+
+    monkeypatch.setattr(u1_cmd, "read_loaded_filaments", fake_read)
+    rc = u1_cmd.cmd_u1(Namespace(subcommand="filaments", moonraker="http://u1.local", api_key=None))
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "PLA SnapSpeed" in out
+    assert "#080A0D" in out
+    assert "230" in out          # first-layer temp from the tag
+    assert "not tagged" in out   # the three untagged slots are stated, not hidden
+
+
+def test_print_accepts_the_read_filament_opt_out():
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="command")
+    u1_cmd.add_u1_subparser(sub)
+
+    args = parser.parse_args(["u1", "print", "job.json", "--moonraker", "http://u1.local",
+                              "--no-read-filament"])
+    assert args.read_filament is False
+
+    args = parser.parse_args(["u1", "print", "job.json", "--moonraker", "http://u1.local"])
+    assert args.read_filament is True

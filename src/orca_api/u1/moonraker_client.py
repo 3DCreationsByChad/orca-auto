@@ -8,6 +8,8 @@ from typing import Any
 
 import httpx
 
+from orca_api.u1.loaded_filament import LoadedFilament, parse_filament_detect
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = 30.0
@@ -53,6 +55,19 @@ class MoonrakerClient:
         )
         resp.raise_for_status()
         return resp.json()["result"]["status"]
+
+    async def get_loaded_filaments(self) -> list[LoadedFilament | None]:
+        """Read the RFID tag of each loaded spool, one entry per tool.
+
+        Untagged spools (and printers that don't report `filament_detect` at all)
+        come back as `None` -- unknown, not empty.
+        """
+        resp = await self._client.get(
+            "/printer/objects/query", params={"filament_detect": ""}
+        )
+        resp.raise_for_status()
+        detect = resp.json()["result"]["status"].get("filament_detect") or {}
+        return parse_filament_detect(detect.get("info") or [])
 
     async def upload_gcode(self, gcode_path: str, *, start: bool = False) -> str:
         """Upload a G-code file to Moonraker's gcodes root.

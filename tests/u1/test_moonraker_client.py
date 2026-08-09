@@ -120,3 +120,34 @@ async def test_upload_raises_on_http_error(tmp_path):
     async with _client(handler) as c:
         with pytest.raises(httpx.HTTPStatusError):
             await c.upload_gcode(str(gcode))
+
+
+async def test_get_loaded_filaments_reads_the_rfid_tags():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/printer/objects/query"
+        assert "filament_detect" in request.url.params
+        return httpx.Response(200, json={"result": {"status": {"filament_detect": {"info": [
+            {"MAIN_TYPE": "PLA", "SUB_TYPE": "SnapSpeed", "ARGB_COLOR": 0xFF080A0D,
+             "FIRST_LAYER_TEMP": 230, "OTHER_LAYER_TEMP": 220, "BED_TEMP": 60,
+             "HOTEND_MIN_TEMP": 190, "HOTEND_MAX_TEMP": 230, "VENDOR": "Snapmaker"},
+            {"MAIN_TYPE": "NONE", "SUB_TYPE": "NONE", "ARGB_COLOR": 0xFFFFFFFF},
+        ]}}}})
+
+    async with _client(handler) as c:
+        loaded = await c.get_loaded_filaments()
+
+    assert len(loaded) == 4
+    assert loaded[0].material == "PLA"
+    assert loaded[0].first_layer_temp == 230
+    assert loaded[1] is None
+
+
+async def test_get_loaded_filaments_on_a_printer_without_the_sensor():
+    """Not every U1 build reports filament_detect -- absence is 'all unknown'."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"result": {"status": {}}})
+
+    async with _client(handler) as c:
+        loaded = await c.get_loaded_filaments()
+
+    assert loaded == [None, None, None, None]

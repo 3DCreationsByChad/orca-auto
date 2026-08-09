@@ -19,7 +19,10 @@ def _parts(tmp_path):
 def test_build_and_slice_wires_builder_then_slicer(tmp_path, monkeypatch):
     work = tmp_path / "work"
 
-    def fake_build(parts, out_path):
+    def fake_build(parts, out_path, datadir, *a, **kw):
+        # the builder resolves filament presets out of the datadir, so the
+        # pipeline must hand its datadir down -- not just to the slicer
+        assert Path(datadir) == Path("/dd")
         Path(out_path).write_bytes(b"PK\x03\x04project")
         return Path(out_path)
 
@@ -40,7 +43,7 @@ def test_build_and_slice_wires_builder_then_slicer(tmp_path, monkeypatch):
 async def test_build_slice_push_uploads_to_moonraker(tmp_path, monkeypatch):
     work = tmp_path / "work"
 
-    def fake_build(parts, out_path):
+    def fake_build(parts, out_path, datadir, *a, **kw):
         Path(out_path).write_bytes(b"PK")
         return Path(out_path)
 
@@ -52,6 +55,9 @@ async def test_build_slice_push_uploads_to_moonraker(tmp_path, monkeypatch):
     monkeypatch.setattr(pl, "slice_3mf", fake_slice)
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/printer/objects/query":
+            # a printer whose spools carry no RFID tags
+            return httpx.Response(200, json={"result": {"status": {}}})
         if request.url.path == "/server/files/upload":
             return httpx.Response(201, json={"item": {"path": "job.gcode"}})
         if request.url.path == "/server/job_queue/job":
@@ -66,3 +72,81 @@ async def test_build_slice_push_uploads_to_moonraker(tmp_path, monkeypatch):
     )
     assert result.pushed_as == "job.gcode"
     assert result.gcode_path.exists()
+
+
+async def test_push_reads_loaded_filaments_from_the_printer_before_building(tmp_path):
+    """The printer is the authority on what is loaded, so ask it before slicing --
+    not after, when the temperatures are already baked into the G-code."""
+    work = tmp_path / "work"
+    seen = {}
+
+    def fake_build(parts, out_path, datadir, *a, **kw):
+        seen["loaded"] = kw.get("loaded")
+        Path(out_path).write_bytes(b"PK")
+        return Path(out_path)
+
+    def fake_slice(in_3mf, out_gcode, **kw):
+        Path(out_gcode).write_text("; g\n")
+        return SliceResult(gcode_path=Path(out_gcode), output_3mf=Path(str(out_gcode) + ".3mf"))
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(pl, "build_u1_3mf", fake_build)
+    monkeypatch.setattr(pl, "slice_3mf", fake_slice)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/printer/objects/query":
+            return httpx.Response(200, json={"result": {"status": {"filament_detect": {"info": [
+                {"MAIN_TYPE": "PLA", "SUB_TYPE": "SnapSpeed", "ARGB_COLOR": 0xFF080A0D,
+                 "FIRST_LAYER_TEMP": 230, "OTHER_LAYER_TEMP": 220, "BED_TEMP": 60,
+                 "HOTEND_MIN_TEMP": 190, "HOTEND_MAX_TEMP": 230, "VENDOR": "Snapmaker"},
+            ]}}}})
+        if request.url.path == "/server/files/upload":
+            return httpx.Response(201, json={"item": {"path": "job.gcode"}})
+        return httpx.Response(200, json={"result": "ok"})
+
+    try:
+        await pl.build_slice_push(
+            _parts(tmp_path), work,
+            moonraker_url="http://u1.local", mode="queue",
+            transport=httpx.MockTransport(handler),
+        )
+    finally:
+        monkeypatch.undo()
+
+    assert seen["loaded"] is not None
+    assert seen["loaded"][0].first_layer_temp == 230
+
+
+async def test_read_filament_can_be_turned_off(tmp_path):
+    work = tmp_path / "work"
+    seen = {}
+
+    def fake_build(parts, out_path, datadir, *a, **kw):
+        seen["loaded"] = kw.get("loaded")
+        Path(out_path).write_bytes(b"PK")
+        return Path(out_path)
+
+    def fake_slice(in_3mf, out_gcode, **kw):
+        Path(out_gcode).write_text("; g\n")
+        return SliceResult(gcode_path=Path(out_gcode), output_3mf=Path(str(out_gcode) + ".3mf"))
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(pl, "build_u1_3mf", fake_build)
+    monkeypatch.setattr(pl, "slice_3mf", fake_slice)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path != "/printer/objects/query", "should not query filaments"
+        if request.url.path == "/server/files/upload":
+            return httpx.Response(201, json={"item": {"path": "job.gcode"}})
+        return httpx.Response(200, json={"result": "ok"})
+
+    try:
+        await pl.build_slice_push(
+            _parts(tmp_path), work,
+            moonraker_url="http://u1.local", mode="queue", read_filament=False,
+            transport=httpx.MockTransport(handler),
+        )
+    finally:
+        monkeypatch.undo()
+
+    assert seen["loaded"] is None
