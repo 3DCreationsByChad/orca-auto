@@ -113,3 +113,68 @@ def test_print_accepts_the_read_filament_opt_out():
 
     args = parser.parse_args(["u1", "print", "job.json", "--moonraker", "http://u1.local"])
     assert args.read_filament is True
+
+
+def _job(tmp_path, parts, support=None):
+    (tmp_path / "a.stl").write_bytes(b"solid\nendsolid\n")
+    (tmp_path / "b.stl").write_bytes(b"solid\nendsolid\n")
+    spec = {"parts": parts}
+    if support:
+        spec["support"] = support
+    p = tmp_path / "job.json"
+    p.write_text(json.dumps(spec))
+    return p
+
+
+def _loaded_black_and_yellow():
+    from orca_api.u1.loaded_filament import parse_filament_detect
+    def tag(mat, argb):
+        return {"MAIN_TYPE": mat, "SUB_TYPE": "", "ARGB_COLOR": argb, "FIRST_LAYER_TEMP": 230,
+                "OTHER_LAYER_TEMP": 220, "BED_TEMP": 60, "HOTEND_MIN_TEMP": 190,
+                "HOTEND_MAX_TEMP": 250, "VENDOR": "Snapmaker"}
+    return parse_filament_detect([tag("PLA", 0xFF080A0D), tag("PLA", 0xFFF4C032)])
+
+
+def test_colour_selects_the_tool_when_no_index_is_given(tmp_path):
+    job = _job(tmp_path, [{"stl": "a.stl", "color": "black", "filament": "PLA"},
+                          {"stl": "b.stl", "color": "#F4C032", "filament": "PLA"}])
+
+    parts = u1_cmd.load_parts(job, loaded=_loaded_black_and_yellow())
+
+    assert [p.assignment.tool_index for p in parts] == [0, 1]
+
+
+def test_explicit_tool_index_wins_over_colour(tmp_path):
+    job = _job(tmp_path, [{"stl": "a.stl", "tool_index": 1, "color": "black", "filament": "PLA"}])
+
+    parts = u1_cmd.load_parts(job, loaded=_loaded_black_and_yellow())
+
+    assert parts[0].assignment.tool_index == 1
+
+
+def test_colour_without_a_printer_says_what_to_do(tmp_path):
+    job = _job(tmp_path, [{"stl": "a.stl", "color": "black", "filament": "PLA"}])
+
+    with pytest.raises(ValueError, match="tool_index|--moonraker"):
+        u1_cmd.load_parts(job)
+
+
+def test_part_with_neither_index_nor_colour_is_rejected(tmp_path):
+    job = _job(tmp_path, [{"stl": "a.stl", "filament": "PLA"}])
+
+    with pytest.raises(ValueError):
+        u1_cmd.load_parts(job, loaded=_loaded_black_and_yellow())
+
+
+def test_support_block_is_parsed_from_the_job(tmp_path):
+    from orca_api.u1.support import SupportSpec
+    job = _job(tmp_path, [{"stl": "a.stl", "tool_index": 0, "filament": "PLA"}],
+               support={"interface": "PETG", "body": "PLA"})
+
+    assert u1_cmd.load_support(job) == SupportSpec(body="PLA", interface="PETG")
+
+
+def test_no_support_block_means_none(tmp_path):
+    job = _job(tmp_path, [{"stl": "a.stl", "tool_index": 0, "filament": "PLA"}])
+
+    assert u1_cmd.load_support(job) is None

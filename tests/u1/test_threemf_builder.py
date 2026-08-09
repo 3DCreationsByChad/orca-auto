@@ -332,3 +332,53 @@ def test_build_u1_3mf_threads_loaded_spools_into_the_archive(tmp_path):
         cfg = json.loads(z.read("Metadata/project_settings.config"))
     assert cfg["nozzle_temperature_initial_layer"][0] == "230"
     assert cfg["hot_plate_temp"][0] == "60"
+
+
+def test_support_spec_reaches_the_built_archive(tmp_path):
+    """Seam test: a `support` block in the job must survive into project_settings."""
+    from orca_api.u1.loaded_filament import parse_filament_detect
+    from orca_api.u1.support import SupportSpec
+    fdir = tmp_path / "datadir" / "system" / "Snapmaker" / "filament"
+    fdir.mkdir(parents=True)
+    for name, mat, temp in [("Snapmaker PLA @U1", "PLA", "220"), ("Snapmaker PETG @U1", "PETG", "255")]:
+        (fdir / f"{name}.json").write_text(json.dumps(
+            {"name": name, "filament_type": [mat], "nozzle_temperature": [temp]}))
+    loaded = parse_filament_detect([
+        {"MAIN_TYPE": "PLA", "SUB_TYPE": "", "ARGB_COLOR": 0xFF080A0D, "FIRST_LAYER_TEMP": 220,
+         "OTHER_LAYER_TEMP": 220, "BED_TEMP": 55, "HOTEND_MIN_TEMP": 190, "HOTEND_MAX_TEMP": 240},
+        {"MAIN_TYPE": "PETG", "SUB_TYPE": "", "ARGB_COLOR": 0xFF1E6FD9, "FIRST_LAYER_TEMP": 255,
+         "OTHER_LAYER_TEMP": 255, "BED_TEMP": 80, "HOTEND_MIN_TEMP": 220, "HOTEND_MAX_TEMP": 270},
+    ])
+    parts = [_cube_part(tmp_path, "a", 0, "PLA")]
+
+    out = build_u1_3mf(parts, tmp_path / "job.3mf", tmp_path / "datadir",
+                       loaded=loaded, support=SupportSpec(interface="PETG"))
+
+    with zipfile.ZipFile(out) as z:
+        cfg = json.loads(z.read("Metadata/project_settings.config"))
+    assert cfg["support_interface_filament"] == 2   # PETG is tool 2, 1-based
+    assert cfg["enable_support"] == 1
+    assert cfg["support_top_z_distance"] == 0        # PETG releases from PLA
+
+
+def test_named_colour_is_stored_as_hex_not_the_word(tmp_path):
+    """`filament_colour` must hold a hex value. A job saying "black" selects the
+    tool by name, but the config needs #RRGGBB -- preferably the spool's real one."""
+    from orca_api.u1.loaded_filament import parse_filament_detect
+    datadir = _u1_bundle(tmp_path)
+    loaded = parse_filament_detect([_pla_tag(ARGB_COLOR=0xFF080A0D)])
+    parts = [U1Part("/a.stl", ToolAssignment(tool_index=0, filament="PLA", color="black"))]
+
+    cfg = _patch_project_settings(parts, datadir, loaded=loaded)
+
+    assert cfg["filament_colour"][0] == "#080A0D"   # the spool's actual colour
+
+
+def test_named_colour_without_a_tagged_spool_falls_back_to_the_named_hex(tmp_path):
+    datadir = _u1_bundle(tmp_path)
+    parts = [U1Part("/a.stl", ToolAssignment(tool_index=0, filament="PLA", color="red"))]
+
+    cfg = _patch_project_settings(parts, datadir)
+
+    assert cfg["filament_colour"][0].startswith("#")
+    assert cfg["filament_colour"][0] != "red"

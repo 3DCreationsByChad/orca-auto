@@ -13,13 +13,18 @@ from argparse import Namespace  # re-exported for tests
 from pathlib import Path
 
 from orca_api.u1.loaded_filament import LoadedFilament
+from orca_api.u1.support import SupportSpec
+from orca_api.u1.filament_presets import FilamentPresetError
+from orca_api.u1.loaded_filament import MaterialMismatch
+from orca_api.u1.tool_resolution import ToolResolutionError, resolve_tool_by_color
 from orca_api.u1.moonraker_client import MoonrakerClient
 from orca_api.u1.pipeline import build_and_slice, build_slice_push
 from orca_api.u1.threemf_builder import U1Part
 from orca_api.u1.tool_map import ToolAssignment
 
 __all__ = ["Namespace", "load_parts", "cmd_u1", "add_u1_subparser",
-           "build_and_slice", "build_slice_push", "read_loaded_filaments"]
+           "build_and_slice", "build_slice_push", "read_loaded_filaments",
+           "load_support"]
 
 
 async def read_loaded_filaments(
@@ -42,12 +47,20 @@ def _print_loaded(loaded: list[LoadedFilament | None]) -> None:
         )
 
 
-def load_parts(job_path: Path | str) -> list[U1Part]:
+def load_parts(
+    job_path: Path | str,
+    loaded: list[LoadedFilament | None] | None = None,
+) -> list[U1Part]:
     """Parse a JSON job spec into U1Part list. STL paths resolve relative to the
     job file's directory when not absolute.
 
+    A part names its tool either explicitly (`tool_index`) or by the colour loaded
+    in it (`color`), which needs `loaded` -- what the printer reports is in each
+    tool. An explicit index always wins.
+
     Raises:
-        ValueError: if `parts` is missing/empty or an entry lacks required keys.
+        ValueError: if `parts` is missing/empty, an entry lacks required keys, or a
+            colour-selected part was given without the printer's loaded filaments.
     """
     job_path = Path(job_path)
     spec = json.loads(job_path.read_text())
@@ -61,19 +74,40 @@ def load_parts(job_path: Path | str) -> list[U1Part]:
         try:
             stl = Path(entry["stl"])
             stl = stl if stl.is_absolute() else (base / stl)
+            color = entry.get("color")
+
+            if entry.get("tool_index") is not None:
+                tool_index = int(entry["tool_index"])
+            elif color is not None:
+                if loaded is None:
+                    raise ValueError(
+                        "selecting a tool by colour needs to know what is loaded -- "
+                        "pass --moonraker so the printer can be asked, or give an "
+                        "explicit tool_index"
+                    )
+                tool_index = resolve_tool_by_color(color, loaded)
+            else:
+                raise ValueError("needs either 'tool_index' or 'color'")
+
             parts.append(
                 U1Part(
                     stl_path=str(stl),
                     assignment=ToolAssignment(
-                        tool_index=int(entry["tool_index"]),
+                        tool_index=tool_index,
                         filament=str(entry["filament"]),
-                        color=entry.get("color"),
+                        color=color,
                     ),
                 )
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise ValueError(f"part #{i} in {job_path} is invalid: {exc}") from exc
     return parts
+
+
+def load_support(job_path: Path | str) -> SupportSpec | None:
+    """Parse the optional `support` block of a job spec."""
+    spec = json.loads(Path(job_path).read_text())
+    return SupportSpec.from_dict(spec.get("support"))
 
 
 def cmd_u1(args: Namespace) -> int:
@@ -84,8 +118,17 @@ def cmd_u1(args: Namespace) -> int:
         _print_loaded(loaded)
         return 0
 
+    moonraker = getattr(args, "moonraker", None)
+    loaded = None
+    if moonraker and getattr(args, "read_filament", True):
+        try:
+            loaded = asyncio.run(read_loaded_filaments(moonraker, getattr(args, "api_key", None)))
+        except Exception as exc:  # printer unreachable is not fatal for slicing
+            print(f"Warning: could not read loaded filament from {moonraker}: {exc}")
+
     try:
-        parts = load_parts(args.job)
+        parts = load_parts(args.job, loaded=loaded)
+        support = load_support(args.job)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"Error: {exc}")
         return 1
@@ -94,7 +137,11 @@ def cmd_u1(args: Namespace) -> int:
 
     if args.subcommand == "slice":
         workdir = args.workdir or str(Path(args.out).parent / "u1-work")
-        result = build_and_slice(parts, workdir, **slice_kw)
+        try:
+            result = build_and_slice(parts, workdir, loaded=loaded, support=support, **slice_kw)
+        except (ToolResolutionError, FilamentPresetError, MaterialMismatch) as exc:
+            print(f"Error: {exc}")
+            return 1
         # Move/copy the produced gcode to the requested --out path
         out = Path(args.out)
         if result.gcode_path != out:
@@ -105,14 +152,18 @@ def cmd_u1(args: Namespace) -> int:
 
     if args.subcommand == "print":
         workdir = args.workdir or "u1-work"
-        result = asyncio.run(
-            build_slice_push(
+        try:
+            result = asyncio.run(
+                build_slice_push(
                 parts, workdir,
                 moonraker_url=args.moonraker, api_key=args.api_key,
-                mode=args.mode, read_filament=getattr(args, "read_filament", True),
-                **slice_kw,
+                mode=args.mode, loaded=loaded, support=support,
+                    read_filament=getattr(args, "read_filament", True), **slice_kw,
+                )
             )
-        )
+        except (ToolResolutionError, FilamentPresetError, MaterialMismatch) as exc:
+            print(f"Error: {exc}")
+            return 1
         print(f"Pushed {result.gcode_path} to {args.moonraker} as {result.pushed_as} (mode={args.mode})")
         return 0
 
@@ -133,7 +184,10 @@ def add_u1_subparser(subparsers) -> None:
                     help="OrcaSlicer data dir (system bundle)")
     sl.add_argument("--bin", default="orcaslicer", help="OrcaSlicer executable")
     sl.add_argument("--display", default=":99", help="X DISPLAY for headless slice")
-    sl.set_defaults(func=cmd_u1)
+    sl.add_argument("--moonraker", default=None,
+                    help="U1 Moonraker URL, to resolve colours and read spool temps")
+    sl.add_argument("--api-key", dest="api_key", default=None, help="Moonraker API key")
+    sl.set_defaults(func=cmd_u1, read_filament=True)
 
     pr = u1_sub.add_parser("print", help="Build, slice, and push to the U1 via Moonraker")
     pr.add_argument("job", help="Path to the JSON job spec")

@@ -22,6 +22,8 @@ from orca_api.u1.loaded_filament import (
     LoadedFilament,
     check_material_match,
 )
+from orca_api.u1.support import SupportSpec, apply_support
+from orca_api.u1.tool_resolution import to_hex
 from orca_api.u1.tool_map import ToolAssignment, build_tool_map
 
 _TOOL_COUNT = 4
@@ -141,10 +143,17 @@ def _patch_project_settings(
                 slots[key][i] = value[0]
 
         slots["filament_settings_id"][i] = name
-        if a.color:
-            slots["filament_colour"][i] = a.color
 
         spool = loaded[i] if loaded and i < len(loaded) else None
+        if a.color:
+            # a job may name a colour ("black") to *select* the tool, but this field
+            # has to be #RRGGBB. Prefer the spool's real colour over an approximation.
+            explicit = to_hex(a.color)
+            if spool is not None and to_hex(a.color) is not None and not a.color.strip().startswith("#"):
+                slots["filament_colour"][i] = spool.color
+            elif explicit is not None:
+                slots["filament_colour"][i] = explicit
+
         if spool is not None:
             check_material_match(tool_index=i, requested=a.filament, loaded=spool)
             _overlay_loaded_spool(slots, spool)
@@ -260,6 +269,7 @@ def build_u1_3mf(
     datadir: str | Path,
     vendor: str = DEFAULT_VENDOR,
     loaded: Sequence[LoadedFilament | None] | None = None,
+    support: SupportSpec | None = None,
 ) -> Path:
     """Build a Snapmaker U1 multicolor project .3mf.
 
@@ -277,6 +287,11 @@ def build_u1_3mf(
     build_tool_map([p.assignment for p in parts])  # validate; raises on bad input
     out = Path(out_path)
     cfg = _patch_project_settings(parts, datadir, vendor, loaded=loaded)
+    if support is not None:
+        apply_support(
+            cfg, support, list(loaded or [None] * _TOOL_COUNT),
+            part_materials=[p.assignment.filament for p in parts],
+        )
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("[Content_Types].xml", _CONTENT_TYPES)
         z.writestr("_rels/.rels", _ROOT_RELS)

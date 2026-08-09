@@ -51,6 +51,8 @@ machine you run it from. No account, no cloud, no vendor slicer.
 - **CLI Tool** - Command-line interface for scripting and automation
 - **Real filament resolution** - U1 tool assignments pull their settings from Snapmaker's own filament profiles, so a slot is heated like the material it claims to be
 - **Reads the spools you actually loaded** - RFID tags supply each spool's own temperatures, and a material mismatch stops the job instead of ruining it
+- **Pick tools by colour, not slot** - say "black", not "tool 3"; job specs survive reloading spools in a different order
+- **Support release materials** - designate a PETG spool as support interface for PLA/ASA prints and take the support gap to zero for a flat, clean-peeling surface
 
 ## Screenshots
 
@@ -272,6 +274,45 @@ The pipeline is: **build** a multicolor project `.3mf` from your STLs + per-part
 
    Pass `--no-read-filament` to skip all of this and use the profile as-is.
 
+   **Name a colour instead of a slot.** Because the printer reports each tool's
+   colour, a part can say which filament it wants rather than which socket it sits in:
+
+   ```json
+   { "parts": [
+       { "stl": "shell.stl", "color": "black",   "filament": "PLA" },
+       { "stl": "inlay.stl", "color": "#F4C032", "filament": "PLA" }
+   ]}
+   ```
+
+   Reload your spools in a different order and the same job still prints correctly.
+   Hex values and common names both work; `tool_index` still wins if you give it.
+   Two spools too alike to tell apart, or a colour that isn't loaded, stops the job
+   rather than picking the least-wrong tool.
+
+   **Designate a spool as support material.** Body and interface are separate:
+
+   ```json
+   { "support": { "interface": "PETG", "body": "PLA" },
+     "parts": [ ... ] }
+   ```
+
+   PETG barely bonds to PLA or ASA. Print the support *interface* in PETG under a
+   PLA part and it peels off in one piece — so the support gap is closed to **zero**
+   and the support-facing surface comes out flat instead of scarred. The material
+   incompatibility does the releasing that an air gap normally does badly.
+
+   That only holds while the materials genuinely don't bond, so the gap is closed
+   **only when every part on the plate is a material the interface releases from**.
+   One PETG part in the plate keeps the air gap — it would weld to its supports. A
+   PLA interface under a PLA part never closes the gap.
+
+   Either field takes a material name (resolved against the loaded spools) or an
+   explicit tool index. Asking for a material you haven't loaded stops the job and
+   lists what you have.
+
+   > Status: the release-gap logic is unit-tested and the generated config verified
+   > against a real U1, but a physical PETG-interface print hasn't been run yet.
+
 2. **Slice only** (build the `.3mf` + G-code, no printer needed):
    ```bash
    orca-auto u1 slice job.json --out job.gcode --bin /usr/local/bin/orcaslicer
@@ -316,6 +357,8 @@ src/orca_api/            # FastAPI service (web UI + REST API)
     ├── threemf_builder.py   # Assemble a multicolor project .3mf
     ├── filament_presets.py    # Resolve real filament settings from the vendor bundle
     ├── loaded_filament.py       # What the RFID tags say is physically in each tool
+    ├── tool_resolution.py         # Find the tool holding a colour or a material
+    ├── support.py                   # Support body/interface material designation
     ├── slice.py                 # Headless OrcaSlicer CLI wrapper
     ├── moonraker_client.py        # Async Moonraker REST client
     ├── tool_map.py                  # 4-tool color/filament assignment model
