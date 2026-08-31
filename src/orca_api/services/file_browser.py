@@ -1,4 +1,4 @@
-"""File browser service for navigating the models directory."""
+"""File browser service for navigating Nextcloud models directory."""
 
 import os
 from datetime import datetime

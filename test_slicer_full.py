@@ -1,4 +1,4 @@
-"""Full test of slicer service with an actual network-storage file."""
+"""Full test of slicer service with actual Nextcloud file."""
 
 import asyncio
 import sys
@@ -11,7 +11,7 @@ from orca_api.config import get_settings
 
 async def main():
     settings = get_settings()
-    print("Testing slicer service with an actual network-storage files...")
+    print("Testing slicer service with actual Nextcloud files...")
     print(f"Models path: {settings.models_path}")
     print(f"Sliced path: {settings.sliced_path}")
     

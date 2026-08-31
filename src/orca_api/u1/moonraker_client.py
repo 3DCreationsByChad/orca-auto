@@ -56,6 +56,26 @@ class MoonrakerClient:
         resp.raise_for_status()
         return resp.json()["result"]["status"]
 
+    async def list_webcams(self) -> list[dict[str, Any]]:
+        """Return Moonraker's configured webcams (name, snapshot_url, etc.)."""
+        resp = await self._client.get("/server/webcams/list")
+        resp.raise_for_status()
+        return resp.json()["result"]["webcams"]
+
+    async def get_snapshot(self, url: str) -> bytes:
+        """Fetch one JPEG frame from a webcam's `snapshot_url`.
+
+        `url` is the full URL a webcam entry reports. It usually names this
+        same printer on a different port, but a misconfigured or hostile
+        webcam entry could point anywhere -- so the Moonraker API key only
+        rides along when `url` shares this client's host.
+        """
+        same_host = httpx.URL(url).host == self._client.base_url.host
+        headers = None if same_host else {"X-Api-Key": None}
+        resp = await self._client.get(url, headers=headers)
+        resp.raise_for_status()
+        return resp.content
+
     async def get_loaded_filaments(self) -> list[LoadedFilament | None]:
         """Read the RFID tag of each loaded spool, one entry per tool.
 

@@ -17,7 +17,7 @@ async def main():
     print(f"Available profiles: {profiles}")
     assert len(profiles) == 4, f"Expected 4 profiles, got {len(profiles)}"
     
-    # Use local copy of test file to avoid network-storage I/O issues
+    # Use local copy of test file to avoid Nextcloud I/O issues
     test_file = "/tmp/test.stl"
     if not os.path.exists(test_file):
         print(f"ERROR: Test file not found: {test_file}")

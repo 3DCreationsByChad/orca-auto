@@ -9,6 +9,7 @@ import trimesh
 
 from orca_api.u1.tool_map import ToolAssignment
 from orca_api.u1.threemf_builder import (
+    _assembly_model_xml,
     U1Part,
     _mesh_model_xml,
     _model3d_rels,
@@ -356,9 +357,12 @@ def test_support_spec_reaches_the_built_archive(tmp_path):
 
     with zipfile.ZipFile(out) as z:
         cfg = json.loads(z.read("Metadata/project_settings.config"))
-    assert cfg["support_interface_filament"] == 2   # PETG is tool 2, 1-based
-    assert cfg["enable_support"] == 1
-    assert cfg["support_top_z_distance"] == 0        # PETG releases from PLA
+    # Strings, not ints: OrcaSlicer's config is stringly typed and silently
+    # discards an int, which is how this shipped writing enable_support=1 into a
+    # .3mf that sliced with support switched off.
+    assert cfg["support_interface_filament"] == "2"  # PETG is tool 2, 1-based
+    assert cfg["enable_support"] == "1"
+    assert cfg["support_top_z_distance"] == "0"      # PETG releases from PLA
 
 
 def test_named_colour_is_stored_as_hex_not_the_word(tmp_path):
@@ -382,3 +386,179 @@ def test_named_colour_without_a_tagged_spool_falls_back_to_the_named_hex(tmp_pat
 
     assert cfg["filament_colour"][0].startswith("#")
     assert cfg["filament_colour"][0] != "red"
+
+
+# --- assembly mode: parts of ONE model sharing an origin -------------------
+
+
+def test_assembly_makes_one_object_with_a_component_per_part():
+    """The two-colour failure mode: separate objects get arranged side by side,
+    so a model split by colour prints as two half-models instead of one."""
+    parts = [
+        U1Part("/body.stl", ToolAssignment(tool_index=1, filament="PLA")),
+        U1Part("/art.stl", ToolAssignment(tool_index=0, filament="PLA")),
+    ]
+    xml = _model3d_xml(parts, assembly=True)
+    root = ET.fromstring(xml)
+    ns = {"m": "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"}
+    objects = root.findall(".//m:resources/m:object", ns)
+    items = root.findall(".//m:build/m:item", ns)
+    assert len(objects) == 1
+    assert len(items) == 1
+    components = objects[0].findall(".//m:component", ns)
+    assert len(components) == 2
+    # identity transforms on every component is what keeps the shared origin
+    for c in components:
+        assert c.get("transform") == "1 0 0 0 1 0 0 0 1 0 0 0"
+    assert [c.get("objectid") for c in components] == ["1", "2"]
+
+
+def test_assembly_gives_each_part_its_own_extruder():
+    parts = [
+        U1Part("/body.stl", ToolAssignment(tool_index=1, filament="PLA")),
+        U1Part("/art.stl", ToolAssignment(tool_index=0, filament="PLA")),
+    ]
+    root = ET.fromstring(_model_settings_xml(parts, assembly=True))
+    objs = root.findall("object")
+    assert len(objs) == 1
+    got = {
+        p.get("id"): p.find("./metadata[@key='extruder']").get("value")
+        for p in objs[0].findall("part")
+    }
+    assert got == {"1": "2", "2": "1"}  # part order, 1-based tool index
+    # exactly one instance on the plate
+    assert len(root.findall(".//plate/model_instance")) == 1
+
+
+def test_assembly_model_holds_every_mesh_under_its_own_id(tmp_path):
+    parts = [
+        _cube_part(tmp_path, "a", 0, "PLA"),
+        _cube_part(tmp_path, "b", 1, "PLA"),
+    ]
+    xml = _assembly_model_xml(parts)
+    assert '<object id="1" type="model">' in xml
+    assert '<object id="2" type="model">' in xml
+    assert xml.count("<vertex ") == 16  # two boxes, 8 vertices each
+
+
+def test_assembly_archive_ships_one_mesh_file(tmp_path):
+    datadir = _u1_bundle(tmp_path)
+    parts = [
+        _cube_part(tmp_path, "a", 0, "PLA"),
+        _cube_part(tmp_path, "b", 1, "PLA"),
+    ]
+    out = tmp_path / "job.3mf"
+    build_u1_3mf(parts, out, datadir, assembly=True)
+    with zipfile.ZipFile(out) as z:
+        names = set(z.namelist())
+        rels = z.read("3D/_rels/3dmodel.model.rels").decode()
+    assert "3D/Objects/assembly.model" in names
+    assert not any(n.startswith("3D/Objects/obj_") for n in names)
+    assert rels.count("<Relationship ") == 1
+
+
+def test_default_still_lays_parts_out_separately(tmp_path):
+    """Assembly is opt-in: a plate of unrelated parts must keep its own objects."""
+    datadir = _u1_bundle(tmp_path)
+    parts = [
+        _cube_part(tmp_path, "a", 0, "PLA"),
+        _cube_part(tmp_path, "b", 1, "PLA"),
+    ]
+    out = tmp_path / "job.3mf"
+    build_u1_3mf(parts, out, datadir)
+    with zipfile.ZipFile(out) as z:
+        names = set(z.namelist())
+        model = z.read("3D/3dmodel.model").decode()
+    assert "3D/Objects/obj_1.model" in names and "3D/Objects/obj_2.model" in names
+    assert model.count("<item ") == 2
+
+
+# --- process overrides -----------------------------------------------------
+
+
+def test_process_overrides_land_in_project_settings(tmp_path):
+    datadir = _u1_bundle(tmp_path)
+    parts = [_cube_part(tmp_path, "a", 0, "PLA")]
+    out = tmp_path / "job.3mf"
+    build_u1_3mf(parts, out, datadir, process={"wall_generator": "arachne"})
+    with zipfile.ZipFile(out) as z:
+        cfg = json.loads(z.read("Metadata/project_settings.config"))
+    assert cfg["wall_generator"] == "arachne"
+
+
+def test_process_overrides_do_not_disturb_resolved_filaments(tmp_path):
+    datadir = _u1_bundle(tmp_path)
+    parts = [_cube_part(tmp_path, "a", 0, "PLA")]
+    out = tmp_path / "job.3mf"
+    build_u1_3mf(parts, out, datadir, process={"wall_generator": "arachne"})
+    with zipfile.ZipFile(out) as z:
+        cfg = json.loads(z.read("Metadata/project_settings.config"))
+    assert cfg["filament_type"][0] == "PLA"
+    assert len(cfg["filament_colour"]) == 4
+
+
+# --- process override type checking ----------------------------------------
+
+
+def test_a_string_setting_given_an_int_is_flagged(tmp_path):
+    """The real bug: OrcaSlicer stores flags as "0"/"1" and silently drops an int."""
+    from orca_api.u1.threemf_builder import check_process_overrides
+    cfg = {"small_area_infill_flow_compensation": "0"}
+    warnings = check_process_overrides(cfg, {"small_area_infill_flow_compensation": 1})
+    assert len(warnings) == 1
+    assert "drops it silently" in warnings[0]
+
+
+def test_a_matching_string_setting_is_not_flagged():
+    from orca_api.u1.threemf_builder import check_process_overrides
+    cfg = {"wall_generator": "classic"}
+    assert check_process_overrides(cfg, {"wall_generator": "arachne"}) == []
+
+
+def test_a_per_tool_list_given_a_scalar_is_flagged():
+    from orca_api.u1.threemf_builder import check_process_overrides
+    cfg = {"enable_pressure_advance": ["0", "0", "0", "0"]}
+    warnings = check_process_overrides(cfg, {"enable_pressure_advance": "1"})
+    assert "one per tool" in warnings[0]
+
+
+def test_a_per_tool_list_of_ints_is_flagged():
+    from orca_api.u1.threemf_builder import check_process_overrides
+    cfg = {"enable_pressure_advance": ["0", "0", "0", "0"]}
+    warnings = check_process_overrides(cfg, {"enable_pressure_advance": [1, 1, 1, 1]})
+    assert "must be strings" in warnings[0]
+
+
+def test_a_matching_per_tool_list_is_not_flagged():
+    from orca_api.u1.threemf_builder import check_process_overrides
+    cfg = {"enable_pressure_advance": ["0", "0", "0", "0"]}
+    assert check_process_overrides(cfg, {"enable_pressure_advance": ["1"] * 4}) == []
+
+
+def test_an_unknown_key_is_flagged_but_allowed():
+    from orca_api.u1.threemf_builder import check_process_overrides
+    warnings = check_process_overrides({"wall_generator": "classic"}, {"wall_genrator": "arachne"})
+    assert "check the spelling" in warnings[0]
+
+
+def test_the_builder_warns_on_a_dropped_override(tmp_path, capsys):
+    datadir = _u1_bundle(tmp_path)
+    parts = [_cube_part(tmp_path, "a", 0, "PLA")]
+    build_u1_3mf(parts, tmp_path / "job.3mf", datadir,
+                 process={"small_area_infill_flow_compensation": 1})
+    assert "drops it silently" in capsys.readouterr().out
+
+
+def test_a_tool_with_no_geometry_still_gets_its_filament_resolved(tmp_path):
+    """A PETG support interface prints at PETG temperature only if its slot is
+    resolved. Designating the tool as support does not do that."""
+    datadir = _u1_bundle(tmp_path)
+    parts = [_cube_part(tmp_path, "a", 0, "PLA")]
+    out = tmp_path / "job.3mf"
+    build_u1_3mf(parts, out, datadir, extra_filaments={3: "PETG"})
+    with zipfile.ZipFile(out) as z:
+        cfg = json.loads(z.read("Metadata/project_settings.config"))
+    assert cfg["filament_type"][3] == "PETG"
+    assert cfg["nozzle_temperature"][3] == "255"
+    assert cfg["filament_type"][0] == "PLA"       # the part's own slot untouched
+    assert cfg["nozzle_temperature"][0] == "220"

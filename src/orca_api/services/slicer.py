@@ -431,8 +431,8 @@ def compute_output_path(input_path: str, profile: str) -> Path:
         Path for output .gcode.3mf file
 
     Example:
-        Input: /data/models/folder/file.stl
-        Output: /data/models-sliced/folder/file_profile.gcode.3mf
+        Input: /mnt/nextcloud/3D Models/folder/file.stl
+        Output: /mnt/nextcloud/3D Models Sliced/folder/file_profile.gcode.3mf
     """
     settings = get_settings()
     models_path = Path(settings.models_path)

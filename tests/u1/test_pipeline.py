@@ -5,8 +5,21 @@ import pytest
 
 from orca_api.u1 import pipeline as pl
 from orca_api.u1.slice import SliceResult
+from orca_api.u1.thumbnail import PreviewError
 from orca_api.u1.tool_map import ToolAssignment
 from orca_api.u1.threemf_builder import U1Part
+
+
+@pytest.fixture(autouse=True)
+def _no_real_openscad(monkeypatch):
+    """Keep the preview render out of unit tests.
+
+    `build_and_slice` embeds a thumbnail by default, which otherwise shells out
+    to a real OpenSCAD -- a hidden dependency that makes these tests pass or
+    fail on what happens to be installed. Tests that care about the preview
+    stub this themselves.
+    """
+    monkeypatch.setattr(pl, "render_thumbnails", lambda *a, **kw: [])
 
 
 def _parts(tmp_path):
@@ -150,3 +163,98 @@ async def test_read_filament_can_be_turned_off(tmp_path):
         monkeypatch.undo()
 
     assert seen["loaded"] is None
+
+
+def test_the_job_name_reaches_both_intermediates(tmp_path, monkeypatch):
+    """Every job used to land as job.gcode, so each one overwrote the last on the
+    printer and the file list held one unidentifiable entry."""
+    def fake_build(parts, out_path, datadir, *a, **kw):
+        Path(out_path).write_bytes(b"PK")
+        return Path(out_path)
+
+    def fake_slice(in_3mf, out_gcode, **kw):
+        Path(out_gcode).write_text("; sliced\n")
+        return SliceResult(gcode_path=Path(out_gcode), output_3mf=Path(str(out_gcode) + ".3mf"))
+
+    monkeypatch.setattr(pl, "build_u1_3mf", fake_build)
+    monkeypatch.setattr(pl, "slice_3mf", fake_slice)
+
+    result = pl.build_and_slice(_parts(tmp_path), tmp_path / "w", name="card-3up")
+    assert result.gcode_path.name == "card-3up.gcode"
+    assert result.project_3mf.name == "card-3up.3mf"
+
+
+def test_a_hostile_job_name_cannot_write_outside_the_workdir(tmp_path, monkeypatch):
+    work = tmp_path / "w"
+
+    def fake_build(parts, out_path, datadir, *a, **kw):
+        Path(out_path).write_bytes(b"PK")
+        return Path(out_path)
+
+    def fake_slice(in_3mf, out_gcode, **kw):
+        Path(out_gcode).write_text("; sliced\n")
+        return SliceResult(gcode_path=Path(out_gcode), output_3mf=Path(str(out_gcode) + ".3mf"))
+
+    monkeypatch.setattr(pl, "build_u1_3mf", fake_build)
+    monkeypatch.setattr(pl, "slice_3mf", fake_slice)
+
+    result = pl.build_and_slice(_parts(tmp_path), work, name="../../etc/passwd")
+    assert result.gcode_path.parent == work
+
+
+def test_the_preview_is_embedded_in_the_sliced_gcode(tmp_path, monkeypatch):
+    def fake_build(parts, out_path, datadir, *a, **kw):
+        Path(out_path).write_bytes(b"PK")
+        return Path(out_path)
+
+    def fake_slice(in_3mf, out_gcode, **kw):
+        Path(out_gcode).write_text("; HEADER_BLOCK_END\nG28\n")
+        return SliceResult(gcode_path=Path(out_gcode), output_3mf=Path(str(out_gcode) + ".3mf"))
+
+    monkeypatch.setattr(pl, "build_u1_3mf", fake_build)
+    monkeypatch.setattr(pl, "slice_3mf", fake_slice)
+    monkeypatch.setattr(pl, "render_thumbnails", lambda *a, **kw: [(b"\x89PNG", 48, 48)])
+
+    result = pl.build_and_slice(_parts(tmp_path), tmp_path / "w")
+    assert "; thumbnail begin 48x48" in result.gcode_path.read_text()
+
+
+def test_a_failed_preview_does_not_lose_the_slice(tmp_path, monkeypatch):
+    """The slice is the expensive part and the print is the point. A missing
+    picture costs a picture; a raised exception costs the job."""
+    def fake_build(parts, out_path, datadir, *a, **kw):
+        Path(out_path).write_bytes(b"PK")
+        return Path(out_path)
+
+    def fake_slice(in_3mf, out_gcode, **kw):
+        Path(out_gcode).write_text("; HEADER_BLOCK_END\nG28\n")
+        return SliceResult(gcode_path=Path(out_gcode), output_3mf=Path(str(out_gcode) + ".3mf"))
+
+    def boom(*a, **kw):
+        raise PreviewError("no GL context")
+
+    monkeypatch.setattr(pl, "build_u1_3mf", fake_build)
+    monkeypatch.setattr(pl, "slice_3mf", fake_slice)
+    monkeypatch.setattr(pl, "render_thumbnails", boom)
+
+    result = pl.build_and_slice(_parts(tmp_path), tmp_path / "w")
+    assert result.gcode_path.read_text() == "; HEADER_BLOCK_END\nG28\n"
+
+
+def test_thumbnails_can_be_turned_off(tmp_path, monkeypatch):
+    called = []
+
+    def fake_build(parts, out_path, datadir, *a, **kw):
+        Path(out_path).write_bytes(b"PK")
+        return Path(out_path)
+
+    def fake_slice(in_3mf, out_gcode, **kw):
+        Path(out_gcode).write_text("; g\n")
+        return SliceResult(gcode_path=Path(out_gcode), output_3mf=Path(str(out_gcode) + ".3mf"))
+
+    monkeypatch.setattr(pl, "build_u1_3mf", fake_build)
+    monkeypatch.setattr(pl, "slice_3mf", fake_slice)
+    monkeypatch.setattr(pl, "render_thumbnails", lambda *a, **kw: called.append(1) or [])
+
+    pl.build_and_slice(_parts(tmp_path), tmp_path / "w", thumbnails=False)
+    assert called == []

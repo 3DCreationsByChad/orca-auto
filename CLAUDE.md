@@ -25,7 +25,7 @@ pip install -r requirements-dev.txt                 # Install + dev/test deps
 uvicorn orca_api.main:app --reload --port 8000      # Dev server (autoreload)
 
 # Testing
-pytest -q                                           # Run test suite (tests/, 38 tests)
+pytest -q                                           # Run test suite (tests/, 232 tests)
 pytest -q -m "not hardware"                         # Skip tests needing real OrcaSlicer/Moonraker (default)
 pytest --cov=src --cov-report=term-missing          # With coverage
 
@@ -58,7 +58,15 @@ src/orca_api/          # FastAPI service (the web UI + REST API)
     ├── slice.py              # Headless OrcaSlicer CLI wrapper (project-.3mf recipe)
     ├── moonraker_client.py   # Async httpx client: upload/enqueue/start/status
     ├── tool_map.py            # 4-tool (U1) color/filament assignment validation
-    └── pipeline.py            # Composes the three above: build -> slice -> (optionally) push
+    ├── filament_presets.py    # Resolve real OrcaSlicer filament presets from the vendor bundle
+    ├── loaded_filament.py     # What is physically loaded per tool, via the spool RFID tags
+    ├── tool_resolution.py     # Resolve tools by loaded material/color instead of slot number
+    ├── naming.py              # Job naming (readable stems + date suffix) on the printer screen
+    ├── scad_parts.py          # Render a job spec's .scad parts to STL before building
+    ├── support.py             # Support body / support interface material designation
+    ├── thumbnail.py           # Render + splice G-code preview thumbnails for the U1 screen
+    ├── timelapse.py           # Client-side webcam timelapse capture during a print
+    └── pipeline.py            # Composes the above: build -> slice -> (optionally) push
 
 src/orca_cli/          # Argparse CLI
 ├── cli.py             # Subcommands; thin HTTP client over the API (slice/list/jobs/etc.)
